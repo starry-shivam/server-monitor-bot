@@ -72,7 +72,6 @@ def restricted(func: Callable):
 
 # --- Shared system sampler for live stats ---
 system_stats = {"cpu": 0, "mem": 0, "disk": 0}
-stop_sampler = asyncio.Event()
 
 
 # Runs via job queue every second
@@ -531,5 +530,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        stop_sampler.set()
         print("\n🛑 Bot stopped.")
