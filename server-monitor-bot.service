@@ -1,0 +1,25 @@
+[Unit]
+Description=Telegram Server Monitor Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/YOUR_USER/server-monitor-bot
+ExecStart=/usr/bin/python3 /home/YOUR_USER/server-monitor-bot/bot.py
+Restart=always
+RestartSec=5
+Environment="BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN"
+Environment="OWNER_ID=123456789"
+Environment="OWNER_ID=username without @"
+
+# Security hardening (Optional)
+User=YOUR_USER
+Group=YOUR_USER
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
+
