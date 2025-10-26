@@ -234,7 +234,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner:
         lines.append(f"I’m owned and operated by @{OWNER_USERNAME}.")
         lines.append(
-            'You can self-host me too — see the source on <a href="https://github.com/xxxxx">GitHub</a>.'
+            'You can self-host me too — see the source on <a href="https://github.com/starry-shivam/server-monitor-bot">GitHub</a>.'
         )
 
     text = "\n\n".join(lines)
