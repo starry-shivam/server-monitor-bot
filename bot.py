@@ -44,7 +44,7 @@ from functools import wraps
 from typing import Any, Callable
 from html import escape
 
-from telegram import Update, InputFile, InputMediaPhoto
+from telegram import Update, InputFile, InputMediaPhoto, Message
 from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
@@ -60,11 +60,21 @@ def restricted(func: Callable):
     async def wrapped(
         update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs
     ):
+        async def delete_msg(msg: Message):
+            try:
+                await asyncio.sleep(3)
+                await msg.delete()
+                if msg.reply_to_message:
+                    await msg.reply_to_message.delete()
+            except Exception:
+                pass
+
         user_id = update.effective_user.id if update.effective_user else None
         if user_id != OWNER_ID:
             msg = await update.message.reply_text("🚫 This command is owner-only.")
-            asyncio.create_task(msg.delete(delay=5))
+            asyncio.create_task(delete_msg(msg))
             return
+
         return await func(update, context, *args, **kwargs)
 
     return wrapped
@@ -131,16 +141,14 @@ def get_shell():
 
 def get_package_count():
     checks = [
-        (
-            "dpkg",
-            ["bash", "-lc", "dpkg-query -f '${binary:Package}\n' -W"],
-        ),  # Debian/Ubuntu
-        ("pacman", ["pacman", "-Qq"]),  # Arch/Manjaro
-        ("rpm", ["rpm", "-qa", "--qf", "%{NAME}\n"]),  # RHEL/Fedora/SUSE
-        ("apk", ["apk", "list", "--installed"]),  # Alpine
-        ("flatpak", ["flatpak", "list", "--app"]),  # Flatpak apps
-        ("snap", ["snap", "list"]),  # Snap packages
+    ("dpkg",   ["bash", "-lc", "dpkg-query -f '${binary:Package}\n' -W"]),  # Debian/Ubuntu
+    ("pacman", ["pacman", "-Qq"]),                                          # Arch/Manjaro
+    ("rpm",    ["rpm", "-qa", "--qf", "%{NAME}\n"]),                        # RHEL/Fedora/SUSE
+    ("apk",    ["apk", "list", "--installed"]),                             # Alpine
+    ("flatpak",["flatpak", "list", "--app"]),                               # Flatpak apps
+    ("snap",   ["snap", "list"]),                                           # Snap packages
     ]
+
     for name, cmd in checks:
         try:
             res = subprocess.run(
