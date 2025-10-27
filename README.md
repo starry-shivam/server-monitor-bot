@@ -38,7 +38,7 @@ python3 bot.py
 
 ## Run as a systemd service (recommended)
 1. Copy and edit the template file `server-monitor-bot/server-monitor-bot.service`
-2. Set User,`WorkingDirectory`, `ExecStart`, and environment vars (`BOT_TOKEN`, `OWNER_ID`, `OWNER_USERNAME`).
+2. Set `User`,`WorkingDirectory`, `ExecStart`, and environment vars (`BOT_TOKEN`, `OWNER_ID`, `OWNER_USERNAME`).
 3. Install and enable:
 
 ```bash
