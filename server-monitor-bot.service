@@ -5,21 +5,19 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/YOUR_USER/server-monitor-bot
-ExecStart=/usr/bin/python3 /home/YOUR_USER/server-monitor-bot/bot.py
+WorkingDirectory=/home/USER/server-monitor-bot
+ExecStart=/home/USER/server-monitor-bot/venv/bin/python bot.py
 Restart=always
 RestartSec=5
-Environment="BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN"
+Environment="BOT_TOKEN=your-token"
 Environment="OWNER_ID=123456789"
-Environment="OWNER_ID=username without @"
+Environment="OWNER_USERNAME=tg-username-without-@"
 
 # Security hardening (Optional)
-User=YOUR_USER
-Group=YOUR_USER
+User=USER
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectHome=yes
+ProtectHome=read-only
 
 [Install]
 WantedBy=multi-user.target
-
