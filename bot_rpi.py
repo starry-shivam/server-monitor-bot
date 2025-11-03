@@ -639,7 +639,6 @@ def main():
     app.add_handler(CommandHandler("powerc", powerc))
 
     app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
-    app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
     app.job_queue.run_once(notify_boot_job, when=5)
     app.job_queue.run_repeating(watchdog_job, interval=300, first=30)
     app.job_queue.run_daily(daily_health_job, time=datetime.time(hour=9, minute=0))
