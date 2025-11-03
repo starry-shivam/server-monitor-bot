@@ -229,7 +229,7 @@ def get_system_info(include_ip=False):
 # --- /start command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    is_owner = bool(user and user.id == OWNER_ID)
+    is_owner = bool(user and user.id in OWNER_IDS)
     bot_name = escape(getattr(context.bot, "first_name", "Bot"))
 
     lines = [
