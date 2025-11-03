@@ -89,6 +89,9 @@ def restricted(func: Callable):
 # --- Shared system sampler for live stats ---
 system_stats = {"cpu": 0, "mem": 0, "disk": 0}
 
+# --- Alert watchdog data ---
+last_alert = {"temp": 0,"ram": 0}
+# ================== Job Queues =================
 
 # Runs via job queue every second
 async def stats_sampler_job(context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +100,65 @@ async def stats_sampler_job(context: ContextTypes.DEFAULT_TYPE):
     system_stats["disk"] = psutil.disk_usage("/").percent
 
 
-# --- OS info utilities ---
+async def notify_boot_job(context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = list(OWNER_IDS)[0]
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text="✅ Bot started (likely server reboot)."
+    )
+
+async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = list(OWNER_IDS)[0]
+    now = time.time()
+
+    # CPU temp (fallback-friendly)
+    temp_c = 0.0
+    temps = psutil.sensors_temperatures()
+    for _, entries in temps.items():
+        for e in entries:
+            if e.current:
+                temp_c = e.current
+                break
+
+    mem_pct = psutil.virtual_memory().percent
+
+    # CPU temp alert (65°C)
+    if temp_c > 65 and now - last_alert["temp"] > 7200:
+        last_alert["temp"] = now
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"🔥 *High CPU Temp:* `{temp_c:.1f}°C`",
+            parse_mode="Markdown"
+        )
+
+    # RAM alert (80%)
+    if mem_pct > 80 and now - last_alert["ram"] > 7200:
+        last_alert["ram"] = now
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"📈 *High RAM Usage:* `{mem_pct:.1f}%`",
+            parse_mode="Markdown"
+        )
+
+async def daily_health_job(context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = list(OWNER_IDS)[0]
+
+    power = format_minimal_power_report()
+    fastfetch = run_fastfetch()
+    text = (
+        "<b>⏰ Daily System Health Report</b>\n\n"
+        f"<pre>{fastfetch}</pre>\n\n"
+        f"<pre>{power}</pre>\n"
+    )
+
+    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+# ============= OS info utilities =============
+
 def get_ip_address():
     try:
         response = r.get("https://api.ipify.org", timeout=5)
@@ -277,8 +338,16 @@ def format_power_report():
     return text
 
 
-# ============= Command Handlers =============
+def format_minimal_power_report():
+    """
+    Prints a minimal power/thermal summary.
+    """
+    rails, total = parse_pmic()
+    temp = get_temp()
+    return f"Power: {total:.3f} W | CPU Temp: {temp:.1f}°C"
 
+
+# ============= Command Handlers =============
 
 # --- /start command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -568,7 +637,12 @@ def main():
     app.add_handler(CommandHandler("shell", shell))
     app.add_handler(CommandHandler("pyexec", pyexec))
     app.add_handler(CommandHandler("powerc", powerc))
+
     app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
+    app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
+    app.job_queue.run_once(notify_boot_job, when=5)
+    app.job_queue.run_repeating(watchdog_job, interval=300, first=30)
+    app.job_queue.run_daily(daily_health_job, time=datetime.time(hour=9, minute=0))
 
     print("🤖 Bot is running…")
     app.run_polling()
