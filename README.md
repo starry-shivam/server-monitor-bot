@@ -1,22 +1,38 @@
 # Server Monitor Bot 🐧
 
-Lightweight Telegram bot to monitor and manage a Linux server. Provides system info, live stats charts, shell/python exec utilities and update/restart integration via systemd.
+Lightweight Telegram bot to monitor and manage a Raspberry Pi home server (tested on Raspberry Pi 5).
+Provides system information, resource charts, remote shell/Python execution, Docker process display,
+power/temperature monitoring, and systemd-based update/restart integration.
+
+Requires [fastfetch](https://github.com/fastfetch-cli/fastfetch) to be installed for `/info` to work.
 
 ## Commands
-(All commands except `/start` are owner-restricted, set `OWNER_ID` to your numeric Telegram id.)
+(All commands except `/start` are owner-restricted. Set `OWNER_ID` to your numeric Telegram user ID.)
 
-- `/start` — Welcome message
-- `/help` — Show available commands (owner-only)
-- `/info` — System info (neofetch-like)
-- `/info -ip` — System info + public IP
-- `/cputemp` — CPU temperature on supported hardware (e.g., Raspberry Pi).
-- `/stats` — Static chart of CPU / RAM / Disk
-- `/stats -live` — Live monitoring (10 updates)
-- `/ping` — Measure Telegram API latency and uptime
-- `/ip` — Show server public IP
-- `/shell` <cmd...> — Run shell command on server
-- `/pyexec` <python code> — Execute Python snippet remotely
-- `/updatebot` — Git pull and restart systemd service
+- /start — Welcome message
+- /help — Show available commands (owner-only)
+
+### System info
+- /info — System info (Neofetch-style, requires fastfetch)
+- /info -ip — Include public IP
+- /ip — Show server public IP
+
+### Monitoring
+- /cputemp — CPU temperature (Raspberry Pi only)
+- /powerc — Raspberry Pi 5 power usage / fan / voltage
+- /stats — Static CPU/RAM/Disk usage chart
+- /stats -live — Live resource monitoring (10 updates)
+- /ping — Measure Telegram API latency & uptime
+
+### Docker
+- /dockerps — Show Docker containers in formatted text (if small enough)
+- /dockerps -img — Force image-based table rendering
+
+### Remote execution
+- /shell `<cmd>` — Run shell commands on the server
+- /pyexec `<py-code>` — Execute Python snippets remotely
+
+---
 
 ## Prerequisites
 - Python 3.9+ (3.10 recommended)
@@ -55,12 +71,13 @@ journalctl -u server-monitor-bot.service -f
 
 ## Security notes
 - `/shell` and `/pyexec` allow arbitrary code execution — use only in trusted environments.
-- Owner-only decorator enforces `OWNER_ID`; ensure `OWNER_ID` is set correctly.
+- Owner-only decorator enforces `OWNER_IDS`; ensure `OWNER_IDS` is set correctly.
 - Review and adapt the systemd unit for additional hardening as needed.
 
 ## Example Output
 
-<img width="1543" height="1286" alt="{2B93CAB9-2D01-41C4-8FC4-A145D833BBCF}" src="https://github.com/user-attachments/assets/c4dfdd7b-f7a5-41cc-a652-36ee24acf7fd" />
+<img width="1549" height="860" alt="{89858651-A38A-41B5-A1F0-4C92FB7376C9}" src="https://github.com/user-attachments/assets/9ac39e78-edb3-4e7d-ba43-ec3173c97ffd" />
+
 
 ## License
 
