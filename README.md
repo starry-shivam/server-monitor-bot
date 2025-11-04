@@ -1,3 +1,5 @@
+# 🫐 Raspberrypi Server Monitor Bot
+
 Lightweight Telegram bot to monitor and manage a **Raspberry Pi home server** (tested on **Raspberry Pi 5**).
 Provides system information, resource charts, Docker container listings (text or image), remote shell/Python execution,
 Pi-specific power/thermal telemetry, **server reboot notifications**, **daily health reports**, and **automatic alerts**
