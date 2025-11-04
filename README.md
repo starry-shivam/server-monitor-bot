@@ -15,7 +15,7 @@ Requires `fastfetch` to be installed for `/info` to work.
 
 #### System info
 - /info — System info (Neofetch/fastfetch-style; requires `fastfetch`)
-- /info -ip — Include public IP in the info block
+- /info -ip — Include local IP in the info block
 - /ip — Show server public IP
 
 #### Monitoring
