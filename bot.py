@@ -680,7 +680,6 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
         "<code>/ip</code> — Get server public IP",
         "<code>/shell</code> — Run shell commands",
         "<code>/pyexec</code> — Run Python code",
-        "<code>/updatebot</code> — Pull from Git & restart",
     ]
     text = "\n".join(lines)
     await update.message.reply_text(
