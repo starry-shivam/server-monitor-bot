@@ -10,7 +10,7 @@ ExecStart=/home/USER/server-monitor-bot/venv/bin/python bot.py
 Restart=always
 RestartSec=5
 Environment="BOT_TOKEN=your-token"
-Environment="OWNER_ID=123456789"
+Environment="OWNER_IDS=123456789,7265289396"
 Environment="OWNER_USERNAME=tg-username-without-@"
 
 # Security hardening (Optional)
