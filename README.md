@@ -1,37 +1,41 @@
-# Server Monitor Bot 🐧
+Lightweight Telegram bot to monitor and manage a **Raspberry Pi home server** (tested on **Raspberry Pi 5**).
+Provides system information, resource charts, Docker container listings (text or image), remote shell/Python execution,
+Pi-specific power/thermal telemetry, **server reboot notifications**, **daily health reports**, and **automatic alerts**
+for high CPU temperature and RAM usage.
 
-Lightweight Telegram bot to monitor and manage a Raspberry Pi home server (tested on Raspberry Pi 5).
-Provides system information, resource charts, remote shell/Python execution, Docker process display,
-power/temperature monitoring, and systemd-based update/restart integration.
-
-Requires [fastfetch](https://github.com/fastfetch-cli/fastfetch) to be installed for `/info` to work.
+Requires `fastfetch` to be installed for `/info` to work.
 
 ## Commands
-(All commands except `/start` are owner-restricted. Set `OWNER_ID` to your numeric Telegram user ID.)
+(All commands except `/start` are owner-restricted. Set `OWNER_IDS` to your numeric Telegram user ID.)
 
 - /start — Welcome message
 - /help — Show available commands (owner-only)
 
-### System info
-- /info — System info (Neofetch-style, requires fastfetch)
-- /info -ip — Include public IP
+#### System info
+- /info — System info (Neofetch/fastfetch-style; requires `fastfetch`)
+- /info -ip — Include public IP in the info block
 - /ip — Show server public IP
 
-### Monitoring
+#### Monitoring
 - /cputemp — CPU temperature (Raspberry Pi only)
-- /powerc — Raspberry Pi 5 power usage / fan / voltage
+- /powerc — Raspberry Pi 5 power usage / fan state / voltage / throttle flags
 - /stats — Static CPU/RAM/Disk usage chart
-- /stats -live — Live resource monitoring (10 updates)
-- /ping — Measure Telegram API latency & uptime
+- /stats -live — Live system monitor (10 updates with 1s refresh)
+- /ping — Measure Telegram API latency and show uptime
 
-### Docker
-- /dockerps — Show Docker containers in formatted text (if small enough)
-- /dockerps -img — Force image-based table rendering
+#### Docker
+- /dockerps — Show Docker containers in formatted text (if it fits)
+- /dockerps -img — Force an image-rendered table of containers
 
-### Remote execution
-- /shell `<cmd>` — Run shell commands on the server
-- /pyexec `<py-code>` — Execute Python snippets remotely
+#### Remote execution
+- /shell <cmd> — Run shell commands on the server
+- /pyexec <python> — Execute a Python snippet remotely
 
+#### Behavior & alerts
+- Sends “Bot started (likely server reboot)” on startup
+- Daily health report (fastfetch summary + minimal power/temperature line)
+- Alert if CPU temp > 65 °C (2h cooldown between alerts)
+- Alert if RAM usage > 80% (2h cooldown between alerts)
 ---
 
 ## Prerequisites
