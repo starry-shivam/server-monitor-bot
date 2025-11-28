@@ -1,49 +1,11 @@
-# 🫐 Raspberrypi Server Monitor Bot
+# Raspberrypi Server Monitor Bot
 
-Lightweight Telegram bot to monitor and manage a **Raspberry Pi home server** (tested on **Raspberry Pi 5**).
+Lightweight Telegram bot to monitor and manage a Raspberry Pi home server (tested on Raspberry Pi 5).
 Provides system information, resource charts, Docker container listings (text or image), remote shell/Python execution,
-Pi-specific power/thermal telemetry, **server reboot notifications**, **daily health reports**, and **automatic alerts**
+Pi-specific power/thermal telemetry, server reboot notifications, daily health reports, and automatic alerts
 for high CPU temperature and RAM usage.
 
-Requires `fastfetch` to be installed for `/info` to work.
-
-## Commands
-(All commands except `/start` are owner-restricted. Set `OWNER_IDS` to your numeric Telegram user ID.)
-
-- /start — Welcome message
-- /help — Show available commands (owner-only)
-
-#### System info
-- /info — System info (Neofetch/fastfetch-style; requires `fastfetch`)
-- /info -ip — Include local IP in the info block
-- /ip — Show server public IP
-
-#### Monitoring
-- /cputemp — CPU temperature (Raspberry Pi only)
-- /powerc — Raspberry Pi 5 power usage / fan state / voltage / throttle flags
-- /stats — Static CPU/RAM/Disk usage chart
-- /stats -live — Live system monitor (10 updates with 1s refresh)
-- /ping — Measure Telegram API latency and show uptime
-
-#### Docker
-- /dockerps — Show Docker containers in formatted text (if it fits)
-- /dockerps -img — Force an image-rendered table of containers
-
-#### Remote execution
-- /shell <cmd> — Run shell commands on the server
-- /pyexec <python> — Execute a Python snippet remotely
-
-#### Behavior & alerts
-- Sends “Bot started (likely server reboot)” on startup
-- Daily health report (fastfetch summary + minimal power/temperature line)
-- Alert if CPU temp > 65 °C (2h cooldown between alerts)
-- Alert if RAM usage > 80% (2h cooldown between alerts)
 ---
-
-## Prerequisites
-- Python 3.9+ (3.10 recommended)
-- System packages for building wheels if needed (build-essential, libffi-dev, etc.)
-- A Telegram bot token and your Telegram numeric user id
 
 ## Install & run (local)
 ```bash
@@ -60,7 +22,7 @@ python3 bot.py
 
 ## Run as a systemd service (recommended)
 1. Copy and edit the template file `server-monitor-bot/server-monitor-bot.service`
-2. Set `User`,`WorkingDirectory`, `ExecStart`, and environment vars (`BOT_TOKEN`, `OWNER_ID`, `OWNER_USERNAME`).
+2. Set `User`,`WorkingDirectory`, `ExecStart`, and environment vars (`BOT_TOKEN`, `OWNER_IDS`, `OWNER_USERNAME`).
 3. Install and enable:
 
 ```bash
@@ -74,11 +36,6 @@ To view logs:
 ```bash
 journalctl -u server-monitor-bot.service -f
 ```
-
-## Security notes
-- `/shell` and `/pyexec` allow arbitrary code execution — use only in trusted environments.
-- Owner-only decorator enforces `OWNER_IDS`; ensure `OWNER_IDS` is set correctly.
-- Review and adapt the systemd unit for additional hardening as needed.
 
 ## Example Output
 
