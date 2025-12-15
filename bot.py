@@ -110,8 +110,6 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     chat_id = list(OWNER_IDS)[0]
     now = time.time()
-
-    # CPU temp (fallback-friendly)
     temp_c = 0.0
     temps = psutil.sensors_temperatures()
     for _, entries in temps.items():
@@ -141,21 +139,6 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def daily_health_job(context: ContextTypes.DEFAULT_TYPE):
-    bot = context.bot
-    chat_id = list(OWNER_IDS)[0]
-
-    power = format_minimal_power_report()
-    fastfetch = run_fastfetch()
-    text = (
-        "<b>⏰ Daily System Health Report</b>\n\n"
-        f"<pre>{fastfetch}</pre>\n\n"
-        f"<pre>{power}</pre>\n"
-    )
-
-    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-
-
 # ============= OS info utilities =============
 
 
@@ -169,7 +152,11 @@ def get_ip_address():
 
 
 def run_fastfetch(include_ip: bool = False) -> str:
-    base_structure = "Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:Display:DE:WM:WMTheme:Theme:Icons:Font:Cursor:Terminal:TerminalFont:CPU:GPU:Memory:Swap:Disk:Battery:PowerAdapter:Locale:Break"
+    base_structure = (
+        "Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:"
+        "Display:DE:WM:Theme:Icons:Font:Terminal:CPU:GPU:"
+        "Memory:Swap:Disk:Battery:Locale:Break"
+    )
     if include_ip:
         # Insert 'LocalIp' before 'Battery'
         structure_parts = base_structure.split(":")
@@ -468,47 +455,6 @@ def _collect_docker_containers() -> list[dict]:
     return containers
 
 
-def _render_docker_table_text(rows: list[dict]) -> str:
-    if not rows:
-        return "<b>No containers found.</b>"
-
-    # Compute column widths for monospace alignment
-    headers = ["Name", "Image", "Status", "Uptime", "Ports"]
-    cols = {h: len(h) for h in headers}
-
-    for r in rows:
-        cols["Name"] = max(cols["Name"], len(r["name"]))
-        cols["Image"] = max(cols["Image"], len(r["image"]))
-        cols["Status"] = max(cols["Status"], len(r["status"]))
-        cols["Uptime"] = max(cols["Uptime"], len(r["uptime"]))
-        # Ports can be long—don’t hard-wrap; Telegram handles wide lines with scroll
-
-    def pad(s, w):
-        return s + " " * max(0, w - len(s))
-
-    head = (
-        f"{pad('Name', cols['Name'])}  "
-        f"{pad('Image', cols['Image'])}  "
-        f"{pad('Status', cols['Status'])}  "
-        f"{pad('Uptime', cols['Uptime'])}  "
-        f"Ports"
-    )
-    sep = "-" * len(head)
-
-    lines = [head, sep]
-    for r in rows:
-        line = (
-            f"{pad(r['name'], cols['Name'])}  "
-            f"{pad(r['image'], cols['Image'])}  "
-            f"{pad(r['status'], cols['Status'])}  "
-            f"{pad(r['uptime'], cols['Uptime'])}  "
-            f"{r['ports']}"
-        )
-        lines.append(line)
-
-    return "<b>🐳 Docker Containers</b>\n\n<pre>" + escape("\n".join(lines)) + "</pre>"
-
-
 def _color_for_status(status: str) -> tuple[float, float, float]:
     s = (status or "").lower()
     if "running" in s:
@@ -670,8 +616,7 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
         f"Hello {user.first_name}! Here are the available commands:\n",
         "<code>/info</code> — System info (Neofetch-like)",
         "<code>/info -ip</code> — Include IP address",
-        "<code>/dockerps</code> — sends a formatted text table (if it fits).",
-        "<code>/dockerps -img</code> — forces an image table.",
+        "<code>/dockerps</code> — Sends table of docker containers and their status",
         "<code>/cputemp</code> — CPU temperature (Pi only)",
         "<code>/powerc</code> — Pi5 power usage / fan / voltage",
         "<code>/stats</code> — Show CPU/RAM/Disk usage",
@@ -699,8 +644,6 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- /dockerps command ---
 @restricted
 async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    force_img = any(arg in ("-img", "--img", "--image") for arg in context.args or [])
-
     try:
         rows = _collect_docker_containers()
     except RuntimeError as e:
@@ -716,16 +659,6 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🐳 No containers found.", parse_mode="HTML")
         return
 
-    text = _render_docker_table_text(rows)
-
-    # Telegram hard limit ~4096 chars. Keep headroom for safety.
-    if (not force_img) and len(text) <= 3800:
-        await update.message.reply_text(
-            text, parse_mode="HTML", disable_web_page_preview=True
-        )
-        return
-
-    # Fallback to image
     try:
         img_bytes = _render_docker_table_image(rows)
         await update.message.reply_photo(
@@ -947,22 +880,45 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # --- /shell command ---
-@restricted
-async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("❌ No command provided.")
-    msg = await update.message.reply_text("💻 Running shell command…")
-    proc = subprocess.Popen(
-        context.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+def run_shell(command: str) -> str:
+    command = command.strip()
+    if not command:
+        raise ValueError("Empty command")
+
+    parts = shlex.split(command)
+
+    if any(p in SHELL_DENYLIST for p in parts):
+        raise PermissionError("Blocked command")
+
+    proc = subprocess.run(
+        parts,
+        capture_output=True,
+        text=True,
+        timeout=SHELL_TIMEOUT,
     )
-    stdout, stderr = proc.communicate()
-    result = (stdout + stderr).decode().strip() or "None"
-    if len(result) > 2500:
-        await msg.edit_text("Results too large. Sending as file.")
-        f = io.BytesIO(result.encode())
-        await update.message.reply_document(f.getvalue(), filename="output.txt")
-    else:
-        await msg.edit_text(f"<pre>{escape(result)}</pre>", parse_mode="HTML")
+
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return output[-SHELL_MAX_OUTPUT:] or "No output."
+
+
+@restricted
+async def shell(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("💻 Running shell command…")
+
+    try:
+        cmd = update.message.text.split(None, 1)[1]
+    except IndexError:
+        return await msg.edit_text("❌ No command provided.")
+
+    try:
+        output = run_shell(cmd)
+        await msg.edit_text(f"<pre>{escape(output)}</pre>", parse_mode="HTML")
+    except PermissionError as e:
+        await msg.edit_text(f"🚫 {escape(str(e))}", parse_mode="HTML")
+    except subprocess.TimeoutExpired:
+        await msg.edit_text("⏱ Command timed out.")
+    except Exception as e:
+        await msg.edit_text(f"❌ {escape(str(e))}", parse_mode="HTML")
 
 
 # ============= Main Application =============
@@ -983,7 +939,6 @@ def main():
     app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
     app.job_queue.run_once(notify_boot_job, when=1)
     app.job_queue.run_repeating(watchdog_job, interval=300, first=30)
-    app.job_queue.run_daily(daily_health_job, time=datetime.time(hour=9, minute=0))
 
     print("🤖 Bot is running…")
     app.run_polling()
