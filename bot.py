@@ -55,6 +55,24 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()}
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 
+SHELL_DENYLIST = {
+    "rm",
+    "mv",
+    "shutdown",
+    "reboot",
+    "init",
+    "systemctl",
+    "service",
+    "bash",
+    "zsh",
+    "sh",
+    "source",
+    "pkill",
+    "killall",
+}
+SHELL_TIMEOUT = 10  # seconds
+SHELL_MAX_OUTPUT = 3600
+
 
 # --- Restriction decorator (owner-only) ---
 def restricted(func: Callable):
