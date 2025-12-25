@@ -711,12 +711,14 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🐳 No containers found.", parse_mode="HTML")
         return
 
+    msg = await update.message.reply_text("🔍 Inspecting available containers...")
     try:
         img_bytes = _render_docker_table_image(rows)
         await update.message.reply_photo(
             photo=InputFile(img_bytes, filename="docker_containers.png"),
             caption="🐳 Docker Containers",
         )
+        await msg.delete()
     except Exception as e:
         # If image fails, at least try sending as a document text file.
         try:
