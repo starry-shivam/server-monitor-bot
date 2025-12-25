@@ -22,10 +22,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+
 import os
 import re
 import io
 import sys
+import json
 import psutil
 import time
 import platform
@@ -34,6 +36,7 @@ import datetime
 import socket
 from pathlib import Path
 import traceback
+import textwrap
 import subprocess
 import shlex
 import tempfile
@@ -56,6 +59,7 @@ OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
 
 SHELL_DENYLIST = {
+    "sudo",
     "rm",
     "mv",
     "shutdown",
@@ -454,8 +458,6 @@ def _collect_docker_containers() -> list[dict]:
             uptime = _humanize_td(diff)
 
         try:
-            import json
-
             ports = json.loads(ports_json)
         except Exception:
             ports = {}
@@ -485,8 +487,6 @@ def _color_for_status(status: str) -> tuple[float, float, float]:
 
 
 def _wrap_text(s: str, width: int) -> str:
-    import textwrap
-
     if not s:
         return "—"
     # keep arrows and ports readable; avoid breaking long tokens
@@ -496,26 +496,23 @@ def _wrap_text(s: str, width: int) -> str:
 def _render_docker_table_image(rows: list[dict]) -> bytes:
     """
     Render a clean, compact, colorized table using matplotlib.
-    - auto height based on rows + wrapping
-    - alternating row stripes
-    - status chip color
     """
-    import math
-    from io import BytesIO
-    import matplotlib.pyplot as plt
+    plt.rcParams["font.family"] = "sans-serif"
 
-    # 1) Prepare data and wrap long fields
-    headers = ["Name", "Image", "Status", "Uptime", "Ports"]
+    headers = ["S. No", "Name", "Image", "Status", "Uptime", "Ports"]
+    wrap = {
+        "Name": 28,
+        "Image": 34,
+        "Status": 12,
+        "Uptime": 10,
+        "Ports": 72,
+    }
 
-    # Heuristic wrap widths (characters) per column.
-    # Ports tends to be huge; others stay modest.
-    wrap = {"Name": 28, "Image": 32, "Status": 12, "Uptime": 10, "Ports": 60}
-
-    # Copy & wrap
     formatted = []
-    for r in rows:
+    for i, r in enumerate(rows, start=1):
         formatted.append(
             {
+                "S. No": str(i),
                 "Name": _wrap_text(r["name"], wrap["Name"]),
                 "Image": _wrap_text(r["image"], wrap["Image"]),
                 "Status": _wrap_text(r["status"], wrap["Status"]),
@@ -524,77 +521,114 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
             }
         )
 
-    # 2) Estimate required height (each wrapped line ~ one row height)
-    def linecount(text: str) -> int:
-        return max(1, text.count("\n") + 1)
+    def linecount(s: str) -> int:
+        return max(1, s.count("\n") + 1)
 
-    base_row_h = 0.48  # inches per line
-    total_lines = 1  # header
+    row_line_counts = [1]  # Header count
     for r in formatted:
-        total_lines += max(
-            linecount(r["Name"]),
-            linecount(r["Image"]),
-            linecount(r["Status"]),
-            linecount(r["Uptime"]),
-            linecount(r["Ports"]),
+        row_line_counts.append(
+            max(
+                linecount(r["Name"]),
+                linecount(r["Image"]),
+                linecount(r["Status"]),
+                linecount(r["Uptime"]),
+                linecount(r["Ports"]),
+            )
         )
 
-    # 3) Choose width and height
-    # Width chosen to comfortably fit 5 columns w/ a big Ports column.
-    fig_w = 12.5  # inches
-    fig_h = min(22, max(2.5, total_lines * base_row_h))
+    base_row_h = 0.45
+    # Calculate total figure height based on content
+    total_lines = sum(row_line_counts)
+    # Add a small buffer to fig_h calculations to prevent accidental cropping before the bbox save
+    fig_h = max(3.0, total_lines * base_row_h) + 0.5
+    fig_w = 14.5
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
+    # We don't strictly need set_position anymore due to the new saving method,
+    # but keeping it doesn't hurt.
+    ax.set_position([0, 0, 1, 1])
+    data = [headers] + [
+        [
+            r["S. No"],
+            r["Name"],
+            r["Image"],
+            r["Status"],
+            r["Uptime"],
+            r["Ports"],
+        ]
+        for r in formatted
+    ]
 
-    # 4) Build 2D cell text (header + rows)
-    data = [headers]
-    for r in formatted:
-        data.append([r["Name"], r["Image"], r["Status"], r["Uptime"], r["Ports"]])
-
-    # Column width fractions (Ports gets most)
-    # These are relative; tweak to taste.
-    col_widths = [0.18, 0.22, 0.12, 0.10, 0.38]
+    # Adjusted column widths slightly
+    col_widths = [0.05, 0.16, 0.22, 0.10, 0.09, 0.38]
 
     tbl = ax.table(
-        cellText=data, loc="upper left", cellLoc="left", colWidths=col_widths
+        cellText=data,
+        cellLoc="left",
+        loc="upper left",
+        colWidths=col_widths,
     )
+
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(9)
-    tbl.scale(1, 1.2)  # a little vertical breathing room
+    tbl.set_fontsize(10.5)
 
-    # 5) Style header
-    header_bg = (0.15, 0.17, 0.22)
+    header_bg = (0.14, 0.16, 0.21)
     header_fg = (1, 1, 1)
-    edge = (0.75, 0.75, 0.75)
-    ncols = len(headers)
-    for c in range(ncols):
-        cell = tbl[0, c]
-        cell.set_text_props(weight="bold", color=header_fg)
-        cell.set_facecolor(header_bg)
-        cell.set_edgecolor(edge)
-        cell.set_linewidth(1.0)
-
-    # 6) Style body: alternating stripes + colored status text
     stripe_a = (0.97, 0.97, 0.98)
-    stripe_b = (1.00, 1.00, 1.00)
+    stripe_b = (1.0, 1.0, 1.0)
+    # Slightly lighter edge color so it's less dominating
+    edge = (0.85, 0.85, 0.88)
 
-    for r in range(1, len(data)):  # skip header
-        bg = stripe_a if (r % 2) else stripe_b
+    ncols = len(headers)
+    # Calculate relative heights for the table cells based on line counts
+    # We normalize against total_lines rather than fig_h now for better internal proportions
+    normalized_heights = [lc / total_lines for lc in row_line_counts]
+
+    for r in range(len(data)):
+        # Use the specific normalized height for this row type
+        current_row_height = normalized_heights[r]
+
         for c in range(ncols):
             cell = tbl[r, c]
-            cell.set_facecolor(bg)
+            # Set height relative to the table's internal structure
+            cell.set_height(current_row_height)
             cell.set_edgecolor(edge)
-            cell.set_linewidth(0.8)
+            cell.set_linewidth(0.5)  # Thinner lines look cleaner
+            # Increased padding significantly to let text breathe
+            cell.PAD = 0.12
+            cell.get_text().set_va("center")
 
-        # status color
-        status_txt = data[r][2]
-        tbl[r, 2].get_text().set_color(_color_for_status(status_txt))
+            if r == 0:
+                cell.set_facecolor(header_bg)
+                cell.get_text().set_color(header_fg)
+                cell.get_text().set_weight("bold")
+            else:
+                cell.set_facecolor(stripe_a if r % 2 else stripe_b)
 
-    # 7) Tighter layout and save
+            if c == 0:
+                cell.get_text().set_ha("center")
+
+    # Colorize status column
+    for r in range(1, len(data)):
+        txt = tbl[r, 3].get_text()
+        # Ensure _color_for_status is available
+        txt.set_color(_color_for_status(data[r][3]))
+        txt.set_weight("bold")
+
+    # Draw the canvas so matplotlib calculates all geometries
+    fig.canvas.draw()
+    # Get the tight bounding box of JUST the table object in pixels
+    renderer = fig.canvas.get_renderer()
+    bbox_pixels = tbl.get_window_extent(renderer)
+    # Convert that pixel bbox into inches (which savefig expects)
+    bbox_inches = bbox_pixels.transformed(fig.dpi_scale_trans.inverted())
+    # Add a tiny amount of padding back just so pixels aren't cut off right at the edge
+    # This creates a very clean, tight border.
+    bbox_final = bbox_inches.expanded(1.01, 1.01)
     buf = BytesIO()
-    plt.tight_layout(pad=0.6)
-    fig.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+    # Save using the tight bounding box and higher DPI for a bigger, crisper image
+    fig.savefig(buf, format="png", dpi=200, bbox_inches=bbox_final, pad_inches=0)
     plt.close(fig)
     return buf.getvalue()
 
