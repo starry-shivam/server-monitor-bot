@@ -57,20 +57,8 @@ OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 
 SHELL_DENYLIST = {
-    "sudo",
-    "rm",
-    "mv",
-    "shutdown",
-    "reboot",
-    "init",
-    "systemctl",
-    "service",
-    "bash",
-    "zsh",
-    "sh",
-    "source",
-    "pkill",
-    "killall",
+    "sudo","rm","mv","shutdown","reboot","init", "systemctl",
+    "service","bash","zsh","sh", "source","pkill","killall",
 }
 SHELL_TIMEOUT = 10  # seconds
 SHELL_MAX_OUTPUT = 3600
@@ -833,7 +821,11 @@ def main():
         app.add_handler(CommandHandler(name, handler))
 
     app.job_queue.run_once(notify_boot_job, when=0.5)
-    app.job_queue.run_repeating(watchdog_job, interval=60, first=30)
+    app.job_queue.run_repeating(
+        watchdog_job,
+        interval=60, first=30,
+        job_kwargs={"misfire_grace_time": None}
+    )
 
     print("🤖 Bot is running…")
     app.run_polling()
