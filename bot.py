@@ -40,8 +40,9 @@ import textwrap
 import subprocess
 import shlex
 import tempfile
-import matplotlib.pyplot as plt
 import requests as r
+import matplotlib.pyplot as plt
+import matplotlib as mpl
 from io import BytesIO
 
 from datetime import timedelta
@@ -57,6 +58,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQu
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()}
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 
 SHELL_DENYLIST = {
     "sudo",
@@ -121,16 +123,14 @@ async def stats_sampler_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def notify_boot_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
-    chat_id = list(OWNER_IDS)[0]
-
     await bot.send_message(
-        chat_id=chat_id, text="✅ Bot started (likely server reboot)."
+        chat_id=LOG_CHANNEL_ID, text="✅ Bot started (likely server reboot)."
     )
 
 
 async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
-    chat_id = list(OWNER_IDS)[0]
+    chat_id = LOG_CHANNEL_ID
     now = time.time()
     temp_c = 0.0
     temps = psutil.sensors_temperatures()
@@ -497,6 +497,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     """
     Render a clean, compact, colorized table using matplotlib.
     """
+    rows = sorted(rows, key=lambda x: x["name"].lower())
     plt.rcParams["font.family"] = "sans-serif"
 
     headers = ["S. No", "Name", "Image", "Status", "Uptime", "Ports"]
@@ -524,7 +525,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     def linecount(s: str) -> int:
         return max(1, s.count("\n") + 1)
 
-    row_line_counts = [1]  # Header count
+    row_line_counts = [1]
     for r in formatted:
         row_line_counts.append(
             max(
@@ -537,17 +538,13 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
         )
 
     base_row_h = 0.45
-    # Calculate total figure height based on content
     total_lines = sum(row_line_counts)
-    # Add a small buffer to fig_h calculations to prevent accidental cropping before the bbox save
     fig_h = max(3.0, total_lines * base_row_h) + 0.5
     fig_w = 14.5
-
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
-    # We don't strictly need set_position anymore due to the new saving method,
-    # but keeping it doesn't hurt.
     ax.set_position([0, 0, 1, 1])
+
     data = [headers] + [
         [
             r["S. No"],
@@ -560,9 +557,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
         for r in formatted
     ]
 
-    # Adjusted column widths slightly
     col_widths = [0.05, 0.16, 0.22, 0.10, 0.09, 0.38]
-
     tbl = ax.table(
         cellText=data,
         cellLoc="left",
@@ -577,25 +572,19 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     header_fg = (1, 1, 1)
     stripe_a = (0.97, 0.97, 0.98)
     stripe_b = (1.0, 1.0, 1.0)
-    # Slightly lighter edge color so it's less dominating
     edge = (0.85, 0.85, 0.88)
 
     ncols = len(headers)
-    # Calculate relative heights for the table cells based on line counts
-    # We normalize against total_lines rather than fig_h now for better internal proportions
     normalized_heights = [lc / total_lines for lc in row_line_counts]
 
     for r in range(len(data)):
-        # Use the specific normalized height for this row type
         current_row_height = normalized_heights[r]
 
         for c in range(ncols):
             cell = tbl[r, c]
-            # Set height relative to the table's internal structure
             cell.set_height(current_row_height)
             cell.set_edgecolor(edge)
-            cell.set_linewidth(0.5)  # Thinner lines look cleaner
-            # Increased padding significantly to let text breathe
+            cell.set_linewidth(0.5)
             cell.PAD = 0.12
             cell.get_text().set_va("center")
 
@@ -605,30 +594,28 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
                 cell.get_text().set_weight("bold")
             else:
                 cell.set_facecolor(stripe_a if r % 2 else stripe_b)
+                # 2. FIX: Force True Black (0,0,0,1) for body text
+                # Default matplotlib black is sometimes slightly greyish
+                cell.get_text().set_color((0, 0, 0, 1))
 
             if c == 0:
                 cell.get_text().set_ha("center")
 
-    # Colorize status column
+    # Colorize status column (This overrides the black set above for this column only)
     for r in range(1, len(data)):
         txt = tbl[r, 3].get_text()
-        # Ensure _color_for_status is available
         txt.set_color(_color_for_status(data[r][3]))
         txt.set_weight("bold")
 
-    # Draw the canvas so matplotlib calculates all geometries
     fig.canvas.draw()
-    # Get the tight bounding box of JUST the table object in pixels
     renderer = fig.canvas.get_renderer()
     bbox_pixels = tbl.get_window_extent(renderer)
-    # Convert that pixel bbox into inches (which savefig expects)
     bbox_inches = bbox_pixels.transformed(fig.dpi_scale_trans.inverted())
-    # Add a tiny amount of padding back just so pixels aren't cut off right at the edge
-    # This creates a very clean, tight border.
     bbox_final = bbox_inches.expanded(1.01, 1.01)
+
     buf = BytesIO()
-    # Save using the tight bounding box and higher DPI for a bigger, crisper image
-    fig.savefig(buf, format="png", dpi=200, bbox_inches=bbox_final, pad_inches=0)
+    # SetDPI to 250 for crisper text rendering
+    fig.savefig(buf, format="png", dpi=250, bbox_inches=bbox_final, pad_inches=0)
     plt.close(fig)
     return buf.getvalue()
 
@@ -648,11 +635,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /help to see all available commands.",
     ]
 
-    if not is_owner:
-        lines.append(f"I’m owned and operated by @{OWNER_USERNAME}.")
-        lines.append(
-            'You can self-host me too — see the source on <a href="https://github.com/starry-shivam/server-monitor-bot">GitHub</a>.'
-        )
+    # if not is_owner:
+    #    lines.append(f"I’m owned and operated by @{OWNER_USERNAME}.")
+    #    lines.append(
+    #        'You can self-host me too — see the source on <a href="https://github.com/starry-shivam/server-monitor-bot">GitHub</a>.'
+    #    )
 
     text = "\n\n".join(lines)
     await update.message.reply_text(
