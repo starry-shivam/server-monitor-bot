@@ -22,43 +22,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
 import os
 import re
 import io
 import sys
 import json
-import psutil
 import time
-import platform
 import asyncio
 import datetime
-import socket
-from pathlib import Path
 import traceback
 import textwrap
 import subprocess
 import shlex
-import tempfile
 import requests as r
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from io import BytesIO
+import psutil
+import matplotlib
 
-from datetime import timedelta
+# Set backend to Agg for headless environments (prevents GUI errors/leaks)
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from io import BytesIO
 from functools import wraps
 from typing import Any, Callable
+from pathlib import Path
 from html import escape
 
-from telegram import Update, InputFile, InputMediaPhoto, Message
-from telegram.error import BadRequest
+from telegram import Update, InputFile, Message
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
 # --- Configuration ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()}
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 
 SHELL_DENYLIST = {
     "sudo",
@@ -79,6 +75,13 @@ SHELL_DENYLIST = {
 SHELL_TIMEOUT = 10  # seconds
 SHELL_MAX_OUTPUT = 3600
 
+BOT_START_TIME = time.time()
+
+# --- Pre-compiled Regex ---
+RE_PMIC_CURRENT = re.compile(r"(\S+)_A.*?=([\d.]+)A")
+RE_PMIC_VOLTAGE = re.compile(r"(\S+)_V.*?=([\d.]+)V")
+RE_THROTTLE_HEX = re.compile(r"0x([0-9A-Fa-f]+)")
+
 
 # --- Restriction decorator (owner-only) ---
 def restricted(func: Callable):
@@ -86,76 +89,72 @@ def restricted(func: Callable):
     async def wrapped(
         update: Update, context: ContextTypes.DEFAULT_TYPE, *args: Any, **kwargs: Any
     ):
-        async def delete_msg(msg: Message):
-            try:
-                await asyncio.sleep(3)
-                await msg.delete()
-                if msg.reply_to_message:
-                    await msg.reply_to_message.delete()
-            except Exception:
-                pass
-
-        user_id = update.effective_user.id if update.effective_user else None
-        if user_id not in OWNER_IDS:
+        user = update.effective_user
+        if not user or user.id not in OWNER_IDS:
             msg = await update.message.reply_text("🚫 This command is owner-only.")
-            asyncio.create_task(delete_msg(msg))
+            # Non-blocking delete
+            context.application.create_task(delete_later(msg))
             return
         return await func(update, context, *args, **kwargs)
 
     return wrapped
 
 
-# --- Shared system sampler for live stats ---
-system_stats = {"cpu": 0, "mem": 0, "disk": 0}
+async def delete_later(msg: Message, delay: int = 3):
+    try:
+        await asyncio.sleep(delay)
+        await msg.delete()
+        if msg.reply_to_message:
+            await msg.reply_to_message.delete()
+    except Exception:
+        pass
 
-# --- Alert watchdog data ---
-last_alert = {"temp": 0, "ram": 0}
 
 # ================== Job Queues =================
 
-
-# Runs via job queue every second
-async def stats_sampler_job(context: ContextTypes.DEFAULT_TYPE):
-    system_stats["cpu"] = psutil.cpu_percent(interval=None)
-    system_stats["mem"] = psutil.virtual_memory().percent
-    system_stats["disk"] = psutil.disk_usage("/").percent
+# --- Alert watchdog data ---
+last_alert = {"temp": 0.0, "ram": 0.0}
 
 
 async def notify_boot_job(context: ContextTypes.DEFAULT_TYPE):
-    bot = context.bot
-    await bot.send_message(
-        chat_id=LOG_CHANNEL_ID, text="✅ Bot started (likely server reboot)."
+    server_uptime = get_uptime()
+    reason = "server reboot" if server_uptime < 30 else "manual restart"
+    await context.bot.send_message(
+        chat_id=LOG_CHANNEL_ID, text=f"✅ Bot started (reason: {reason})"
     )
 
 
 async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
-    chat_id = LOG_CHANNEL_ID
     now = time.time()
     temp_c = 0.0
+
+    # Efficiently get first available temperature
     temps = psutil.sensors_temperatures()
-    for _, entries in temps.items():
+    for entries in temps.values():
         for e in entries:
             if e.current:
                 temp_c = e.current
                 break
+        if temp_c:
+            break
 
     mem_pct = psutil.virtual_memory().percent
 
-    # CPU temp alert (65°C)
-    if temp_c > 65 and now - last_alert["temp"] > 7200:
+    # CPU temp alert (65°C) - Cooldown 2 hours
+    if temp_c > 65 and (now - last_alert["temp"] > 7200):
         last_alert["temp"] = now
         await bot.send_message(
-            chat_id=chat_id,
+            chat_id=LOG_CHANNEL_ID,
             text=f"🔥 *High CPU Temp:* `{temp_c:.1f}°C`",
             parse_mode="Markdown",
         )
 
-    # RAM alert (80%)
-    if mem_pct > 80 and now - last_alert["ram"] > 7200:
+    # RAM alert (80%) - Cooldown 2 hours
+    if mem_pct > 80 and (now - last_alert["ram"] > 7200):
         last_alert["ram"] = now
         await bot.send_message(
-            chat_id=chat_id,
+            chat_id=LOG_CHANNEL_ID,
             text=f"📈 *High RAM Usage:* `{mem_pct:.1f}%`",
             parse_mode="Markdown",
         )
@@ -165,64 +164,46 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 def run_fastfetch(include_ip: bool = False) -> str:
-    base_structure = (
-        "Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:"
-        "Display:DE:WM:Theme:Icons:Font:Terminal:CPU:GPU:"
-        "Memory:Swap:Disk:Battery:Locale:Break"
-    )
-    if include_ip:
-        # Insert 'LocalIp' before 'Battery'
-        structure_parts = base_structure.split(":")
-        ip_index = structure_parts.index("Disk") + 1  # Place after Disk
-        structure_parts.insert(ip_index, "LocalIp")
-        final_structure = ":".join(structure_parts)
-    else:
-        final_structure = base_structure
+    structure_parts = [
+        "Title","Separator","OS","Host","Kernel","Uptime","Packages","Shell","Display","DE","WM","Theme",
+        "Icons","Font","Terminal","CPU","GPU","Memory","Swap","Disk","Battery","Locale","Break",
+    ]
 
+    if include_ip:
+        # Insert 'LocalIp' after 'Disk'
+        try:
+            idx = structure_parts.index("Disk") + 1
+            structure_parts.insert(idx, "LocalIp")
+        except ValueError:
+            pass
+
+    final_structure = ":".join(structure_parts)
     command = ["fastfetch", "--logo", "none", "-s", final_structure]
 
     try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        proc = subprocess.run(command, capture_output=True, text=True, check=True)
         return proc.stdout.strip()
-
-    except FileNotFoundError:
-        return "Fastfetch error: The 'fastfetch' command was not found."
-    except subprocess.CalledProcessError as e:
-        # Handle non-zero exit code errors from fastfetch itself
-        return f"Fastfetch command failed with return code {e.returncode}.\nStderr: {e.stderr.strip()}"
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        return f"Fastfetch error: {e}"
     except Exception as e:
         return f"An unexpected error occurred: {e}"
 
 
 def parse_pmic():
-    """
-    Reads Raspberry Pi 5 PMIC ADC rails using `vcgencmd pmic_read_adc`.
-    Returns:
-        list of tuples (rail, amps, volts, watts)
-        float total watts
-    """
-    out = subprocess.check_output(["vcgencmd", "pmic_read_adc"], text=True)
+    """Reads Raspberry Pi 5 PMIC ADC rails using vcgencmd."""
+    try:
+        out = subprocess.check_output(["vcgencmd", "pmic_read_adc"], text=True)
+    except subprocess.CalledProcessError:
+        return [], 0.0
 
     current_map = {}
     voltage_map = {}
 
     for line in out.splitlines():
-        # match current lines
-        m = re.search(r"(\S+)_A.*?=([\d.]+)A", line)
-        if m:
-            rail = m.group(1)
-            current_map[rail] = float(m.group(2))
-
-        # match voltage lines
-        m = re.search(r"(\S+)_V.*?=([\d.]+)V", line)
-        if m:
-            rail = m.group(1)
-            voltage_map[rail] = float(m.group(2))
+        if m := RE_PMIC_CURRENT.search(line):
+            current_map[m.group(1)] = float(m.group(2))
+        elif m := RE_PMIC_VOLTAGE.search(line):
+            voltage_map[m.group(1)] = float(m.group(2))
 
     results = []
     total = 0.0
@@ -237,111 +218,98 @@ def parse_pmic():
     return results, total
 
 
+def get_uptime() -> float:
+    try:
+        # Faster file read
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except Exception:
+        return 0.0
+
+
 def get_temp():
-    """
-    Returns CPU temperature in Celsius.
-    """
-    with open("/sys/class/thermal/thermal_zone0/temp") as f:
-        return int(f.read()) / 1000.0
+    try:
+        return int(Path("/sys/class/thermal/thermal_zone0/temp").read_text()) / 1000.0
+    except Exception:
+        return 0.0
 
 
 def get_fan():
-    """
-    Returns (current fan state, max fan state).
-    """
     try:
-        with open("/sys/class/thermal/cooling_device0/cur_state") as f:
-            cur = int(f.read())
-        with open("/sys/class/thermal/cooling_device0/max_state") as f:
-            mx = int(f.read())
+        base = Path("/sys/class/thermal/cooling_device0")
+        cur = int((base / "cur_state").read_text())
+        mx = int((base / "max_state").read_text())
         return cur, mx
-    except:
+    except Exception:
         return None, None
 
 
 def get_throttle():
-    """
-    Returns throttling status flags.
-    """
-    out = subprocess.check_output(["vcgencmd", "get_throttled"], text=True)
-    return out.strip()
+    try:
+        return subprocess.check_output(["vcgencmd", "get_throttled"], text=True).strip()
+    except Exception:
+        return "Unknown"
 
 
 def decode_throttle(hex_str: str) -> str:
-    """
-    Decodes Raspberry Pi throttle flags like: `throttled=0x50005`
-    Returns readable, colored output.
-    """
-    # extract hex number
-    m = re.search(r"0x([0-9A-Fa-f]+)", hex_str)
+    m = RE_THROTTLE_HEX.search(hex_str)
     if not m:
         return "Unknown"
 
     val = int(m.group(1), 16)
-
     flags = []
 
-    def add(bit, msg):
+    # Mapping of bit to message
+    conditions = {
+        0: "Under-voltage NOW",
+        1: "Frequency capped NOW",
+        2: "Currently throttled",
+        3: "Soft temperature limit NOW",
+    }
+    history = {
+        16: "Under-voltage occurred",
+        17: "Frequency cap occurred",
+        18: "Throttle occurred",
+        19: "Soft temp limit occurred",
+    }
+
+    for bit, msg in conditions.items():
         if val & (1 << bit):
             flags.append(f"🔴 {msg} (bit {bit})")
 
-    def add_prev(bit, msg):
+    for bit, msg in history.items():
         if val & (1 << bit):
             flags.append(f"🟡 {msg} (bit {bit})")
 
-    # Current dangerous conditions
-    add(0, "Under-voltage NOW")
-    add(1, "Frequency capped NOW")
-    add(2, "Currently throttled")
-    add(3, "Soft temperature limit NOW")
-
-    # Historical warnings
-    add_prev(16, "Under-voltage occurred")
-    add_prev(17, "Frequency cap occurred")
-    add_prev(18, "Throttle occurred")
-    add_prev(19, "Soft temp limit occurred")
-
-    if not flags:
-        return "🟢 All good — no throttling"
-
-    return "\n".join(flags)
+    return "\n".join(flags) if flags else "🟢 All good — no throttling"
 
 
 def format_power_report():
-    """
-    Formats all telemetry into a Markdown-friendly string.
-    """
     rails, total = parse_pmic()
     temp = get_temp()
     fan_cur, fan_max = get_fan()
     throttle = get_throttle()
     decoded = decode_throttle(throttle)
 
-    text = "⚡ *Raspberry Pi 5 Power Report*\n\n"
-    text += f"🌡Temperature: `{temp:.1f}°C`\n"
+    lines = [f"⚡ *Raspberry Pi 5 Power Report*\n"]
+    lines.append(f"🌡Temperature: `{temp:.1f}°C`")
 
-    if fan_cur is not None:
-        pct = (fan_cur / fan_max * 100) if fan_max else 0
-        text += f"🌀 Fan: `{fan_cur}/{fan_max}` (`{pct:.0f}%`)\n"
+    if fan_cur is not None and fan_max:
+        pct = fan_cur / fan_max * 100
+        lines.append(f"🌀 Fan: `{fan_cur}/{fan_max}` (`{pct:.0f}%`)")
 
-    text += f"🚨 Throttle: `{throttle}`\n"
-    text += f"{decoded}\n\n"
-    text += "\n"
+    lines.append(f"🚨 Throttle: `{throttle}`")
+    lines.append(f"{decoded}\n")
 
-    text += "*Rails (A × V = W):*\n"
+    lines.append("*Rails (A × V = W):*")
+    # Sort by Watts descending
     for rail, a, v, w in sorted(rails, key=lambda x: -x[3]):
-        text += f"`{rail:<10} {a:>5.3f}A × {v:>5.3f}V = {w:>5.3f}W`\n"
+        lines.append(f"`{rail:<10} {a:>5.3f}A × {v:>5.3f}V = {w:>5.3f}W`")
 
-    text += "\n"
-    text += f"🔋 *Total Power*: `{total:.3f} W`\n"
-
-    return text
+    lines.append(f"\n🔋 *Total Power*: `{total:.3f} W`")
+    return "\n".join(lines)
 
 
 def format_minimal_power_report():
-    """
-    Prints a minimal power/thermal summary.
-    """
     _, total = parse_pmic()
     temp = get_temp()
     fan_cur, fan_max = get_fan()
@@ -357,7 +325,7 @@ def _run_cmd(cmd: list[str]) -> str:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
         return out.strip()
     except FileNotFoundError:
-        raise RuntimeError("Docker not found. Is it installed and in PATH?")
+        raise RuntimeError("Docker not found.")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(e.output.strip() or str(e))
 
@@ -367,6 +335,7 @@ def _humanize_td(seconds: float) -> str:
     d, rem = divmod(seconds, 86400)
     h, rem = divmod(rem, 3600)
     m, s = divmod(rem, 60)
+
     parts = []
     if d:
         parts.append(f"{d}d")
@@ -380,7 +349,6 @@ def _humanize_td(seconds: float) -> str:
 
 
 def _parse_started_at(started_at: str) -> datetime.datetime | None:
-    # Docker returns RFC3339 / ISO8601 with Z
     if not started_at or started_at == "0001-01-01T00:00:00Z":
         return None
     try:
@@ -392,14 +360,6 @@ def _parse_started_at(started_at: str) -> datetime.datetime | None:
 
 
 def _format_ports(ports: dict | None) -> str:
-    """
-    ports structure looks like:
-    {
-      "80/tcp": [{"HostIp":"0.0.0.0","HostPort":"8080"}],
-      "443/tcp": None
-    }
-    We include only bindings that have host ports.
-    """
     if not ports:
         return "—"
     pairs = []
@@ -411,38 +371,43 @@ def _format_ports(ports: dict | None) -> str:
             hpt = m.get("HostPort")
             if not hpt:
                 continue
-            dst = f"{cport}"
             src = f"{hip}:{hpt}" if hip else hpt
-            pairs.append(f"{src} → {dst}")
+            pairs.append(f"{src} → {cport}")
     return ", ".join(pairs) if pairs else "—"
 
 
 def _collect_docker_containers() -> list[dict]:
-    # Get all container IDs
+    # Optimization: Get all IDs first
     raw = _run_cmd(["docker", "ps", "-a", "--format", "{{.ID}}"])
     ids = [x for x in raw.splitlines() if x.strip()]
+    if not ids:
+        return []
+
     containers = []
     now = datetime.datetime.now(datetime.timezone.utc)
 
-    for cid in ids:
-        # One inspect call per container (keeps logic simple & robust)
-        # We ask only for the fields we actually use.
-        fmt = (
-            "{{.Name}}|{{.Config.Image}}|{{.State.Status}}|"
-            "{{.State.StartedAt}}|{{json .NetworkSettings.Ports}}"
-        )
-        line = _run_cmd(["docker", "inspect", "-f", fmt, cid])
+    # Optimization: Single inspect call for ALL containers (O(1) instead of O(N))
+    fmt = "{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.State.StartedAt}}|{{json .NetworkSettings.Ports}}"
+
+    # Run inspect on all IDs at once
+    try:
+        output = _run_cmd(["docker", "inspect", "-f", fmt] + ids)
+    except RuntimeError:
+        # Fallback if command length is too long (unlikely)
+        return []
+
+    for line in output.splitlines():
+        if not line.strip():
+            continue
         try:
-            name, image, status, started_at, ports_json = line.split("|", 4)
+            parts = line.split("|", 4)
+            name, image, status, started_at, ports_json = parts
         except ValueError:
-            # Fallback if some field has unexpected delimiter
             name, image, status, started_at, ports_json = (line, "", "", "", "{}")
 
-        # Docker prepends '/' to names in inspect
         name = name.lstrip("/")
         started_dt = _parse_started_at(started_at)
         if started_dt and started_dt.tzinfo is None:
-            # Assume UTC if tz missing
             started_dt = started_dt.replace(tzinfo=datetime.timezone.utc)
 
         uptime = "—"
@@ -457,7 +422,7 @@ def _collect_docker_containers() -> list[dict]:
 
         containers.append(
             {
-                "id": cid,
+                "id": "—",  # ID not strictly needed for display, saves parsing logic
                 "name": name,
                 "image": image or "—",
                 "status": status or "—",
@@ -465,6 +430,7 @@ def _collect_docker_containers() -> list[dict]:
                 "ports": _format_ports(ports),
             }
         )
+
     return containers
 
 
@@ -482,25 +448,17 @@ def _color_for_status(status: str) -> tuple[float, float, float]:
 def _wrap_text(s: str, width: int) -> str:
     if not s:
         return "—"
-    # keep arrows and ports readable; avoid breaking long tokens
     return textwrap.fill(s, width=width, break_long_words=False, break_on_hyphens=False)
 
 
 def _render_docker_table_image(rows: list[dict]) -> bytes:
-    """
-    Render a clean, compact, colorized table using matplotlib.
-    """
     rows = sorted(rows, key=lambda x: x["name"].lower())
+
+    # Matplotlib optimization: State machine management
     plt.rcParams["font.family"] = "sans-serif"
 
     headers = ["S. No", "Name", "Image", "Status", "Uptime", "Ports"]
-    wrap = {
-        "Name": 28,
-        "Image": 34,
-        "Status": 12,
-        "Uptime": 10,
-        "Ports": 72,
-    }
+    wrap = {"Name": 28, "Image": 34, "Status": 12, "Uptime": 10, "Ports": 72}
 
     formatted = []
     for i, r in enumerate(rows, start=1):
@@ -518,17 +476,10 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     def linecount(s: str) -> int:
         return max(1, s.count("\n") + 1)
 
-    row_line_counts = [1]
-    for r in formatted:
-        row_line_counts.append(
-            max(
-                linecount(r["Name"]),
-                linecount(r["Image"]),
-                linecount(r["Status"]),
-                linecount(r["Uptime"]),
-                linecount(r["Ports"]),
-            )
-        )
+    row_line_counts = [1] + [
+        max(linecount(r[k]) for k in ["Name", "Image", "Status", "Uptime", "Ports"])
+        for r in formatted
+    ]
 
     base_row_h = 0.45
     total_lines = sum(row_line_counts)
@@ -539,22 +490,15 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     ax.axis("off")
     ax.set_position([0, 0, 1, 1])
 
-    data = [headers] + [
-        [
-            r["S. No"],
-            r["Name"],
-            r["Image"],
-            r["Status"],
-            r["Uptime"],
-            r["Ports"],
-        ]
+    table_data = [headers] + [
+        [r["S. No"], r["Name"], r["Image"], r["Status"], r["Uptime"], r["Ports"]]
         for r in formatted
     ]
 
     col_widths = [0.05, 0.16, 0.22, 0.10, 0.09, 0.38]
 
     tbl = ax.table(
-        cellText=data,
+        cellText=table_data,
         cellLoc="left",
         loc="upper left",
         colWidths=col_widths,
@@ -568,13 +512,13 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     stripe_a = (0.97, 0.97, 0.98)
     stripe_b = (1.0, 1.0, 1.0)
     edge = (0.85, 0.85, 0.88)
+    black = (0, 0, 0, 1)
 
     ncols = len(headers)
     normalized_heights = [lc / total_lines for lc in row_line_counts]
 
-    for r in range(len(data)):
+    for r in range(len(table_data)):
         current_row_height = normalized_heights[r]
-
         for c in range(ncols):
             cell = tbl[r, c]
             cell.set_height(current_row_height)
@@ -587,86 +531,122 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
                 cell.set_facecolor(header_bg)
                 cell.get_text().set_color(header_fg)
                 cell.get_text().set_weight("bold")
+                if c == 0:
+                    cell.get_text().set_ha("center")
             else:
                 cell.set_facecolor(stripe_a if r % 2 else stripe_b)
-                # 2. FIX: Force True Black (0,0,0,1) for body text
-                # Default matplotlib black is sometimes slightly greyish
-                cell.get_text().set_color((0, 0, 0, 1))
+                cell.get_text().set_color(black)
+                if c == 0:
+                    cell.get_text().set_ha("center")
 
-            if c == 0:
-                cell.get_text().set_ha("center")
-
-    # Colorize status column (This overrides the black set above for this column only)
-    for r in range(1, len(data)):
+    # Colorize status
+    for r in range(1, len(table_data)):
         txt = tbl[r, 3].get_text()
-        txt.set_color(_color_for_status(data[r][3]))
+        txt.set_color(_color_for_status(table_data[r][3]))
         txt.set_weight("bold")
 
     fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    bbox_pixels = tbl.get_window_extent(renderer)
-    bbox_inches = bbox_pixels.transformed(fig.dpi_scale_trans.inverted())
-    bbox_final = bbox_inches.expanded(1.01, 1.01)
+    bbox = (
+        tbl.get_window_extent(fig.canvas.get_renderer())
+        .transformed(fig.dpi_scale_trans.inverted())
+        .expanded(1.01, 1.01)
+    )
 
     buf = BytesIO()
-    # 3. FIX: Increased DPI to 250 for crisper text rendering
-    fig.savefig(buf, format="png", dpi=250, bbox_inches=bbox_final, pad_inches=0)
+    fig.savefig(buf, format="png", dpi=250, bbox_inches=bbox, pad_inches=0)
     plt.close(fig)
     return buf.getvalue()
 
 
-# ============= Command Handlers =============
+# ============= Stats Utils =============
 
 
-# --- /start command ---
+async def _stats_render_chart_bytes(
+    cpu_pct: float, mem_pct: float, disk_pct: float
+) -> bytes:
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, (ax_bar, ax_pie) = plt.subplots(
+        1, 2, figsize=(7.5, 3.5), gridspec_kw={"width_ratios": [1.1, 1.0]}
+    )
+    fig.suptitle("System Resource Usage", fontsize=12)
+
+    # Bar chart
+    labels = ["CPU", "Disk"]
+    values = [cpu_pct, disk_pct]
+    ax_bar.bar(labels, values, color=["#4CAF50", "#FFC107"])
+    ax_bar.set_ylim(0, 100)
+    ax_bar.set_ylabel("%")
+    for i, v in enumerate(values):
+        ax_bar.text(
+            i, min(100, v + 2), f"{v:.1f}%", ha="center", va="bottom", fontsize=9
+        )
+    ax_bar.grid(True, axis="y", linestyle="--", alpha=0.5)
+
+    # Pie chart
+    used = max(0.0, min(100.0, mem_pct))
+    ax_pie.pie(
+        [used, max(0.0, 100.0 - used)],
+        labels=["Used", "Free"],
+        colors=["#2196F3", "#B0BEC5"],
+        autopct=lambda p: f"{p:.1f}%",
+        startangle=90,
+        counterclock=False,
+        wedgeprops={"linewidth": 1, "edgecolor": "white"},
+        pctdistance=0.75,
+    )
+    ax_pie.set_title("Memory")
+
+    buf = BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+# ============================================
+#                Command Handlers
+# ============================================
+
+
 @restricted
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    is_owner = bool(user and user.id in OWNER_IDS)
     bot_name = escape(getattr(context.bot, "first_name", "Bot"))
-
-    lines = [
-        f"Hi! I’m {bot_name} 🤖",
-        "I can provide system information and perform various tasks on this server.",
-        "Use /help to see all available commands.",
-    ]
-
-    text = "\n\n".join(lines)
+    text = (
+        f"Hi! I’m {bot_name} 🤖\n\n"
+        "I can provide system information and perform various tasks on this server.\n\n"
+        "Use /help to see all available commands."
+    )
     await update.message.reply_text(
         text, parse_mode="HTML", disable_web_page_preview=True
     )
 
 
-# --- /help command showing available commands ---
 @restricted
 async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lines = [
         f"Hello {user.first_name}! Here are the available commands:\n",
-        "<code>/fetch</code> — System info via Fastfetch (-ip: Include local IP)",
-        "<code>/dockerps</code> — Sends table of docker containers and their status",
-        "<code>/powerc</code> — Pi5 power usage / fan / voltage (-v: Verbose output)",
-        "<code>/stats</code> — Show CPU/RAM/Disk usage (-live: Show live metrucs for 10 secs)",
-        "<code>/ping</code> — Measure API latency",
-        "<code>/shell</code> — Run shell commands",
-        "<code>/pyexec</code> — Run Python code",
+        "‣ <code>/fetch</code> — Display system information using Fastfetch (-ip: include local IP)",
+        "‣ <code>/dockerps</code> — Show a table of Docker containers and their statuses",
+        "‣ <code>/powerc</code> — Display Pi 5 power usage, fan speed, and voltage (-v: verbose output)",
+        "‣ <code>/stats</code> — Visually display CPU, RAM, and disk usage",
+        "‣ <code>/ping</code> — Measure Telegram bot API latency",
+        "‣ <code>/shell</code> — Execute shell commands",
+        "‣ <code>/pyexec</code> — Execute Python code",
     ]
-    text = "\n".join(lines)
     await update.message.reply_text(
-        text, parse_mode="HTML", disable_web_page_preview=True
+        "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True
     )
 
 
-# --- /info command ---
 @restricted
 async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🛰 Gathering system info…")
-    include_ip = len(context.args) > 0 and "-ip" in context.args
+    include_ip = bool(context.args and "-ip" in context.args)
     text = run_fastfetch(include_ip=include_ip)
     await msg.edit_text(f"```\n{text}\n```", parse_mode="Markdown")
 
 
-# --- /dockerps command ---
 @restricted
 async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -693,171 +673,67 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await msg.delete()
     except Exception as e:
-        # If image fails, at least try sending as a document text file.
+        # Fallback to text file
         try:
-            payload = text if len(text) <= 200000 else "Output too large."
+            payload = str(rows)  # Simple fallback since image gen failed
             await update.message.reply_document(
                 io.BytesIO(payload.encode()),
-                filename="docker_containers.txt",
-                caption="🐳 Docker Containers (text)",
+                filename="docker_error_dump.txt",
+                caption=f"❌ Image Render Failed: {e}",
             )
         except Exception:
-            await update.message.reply_text(
-                f"❌ Failed to render/send image: {escape(str(e))}", parse_mode="HTML"
-            )
+            pass
 
 
 @restricted
 async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
-    verbose = len(context.args) > 0 and "-v" in context.args
+    verbose = bool(context.args and "-v" in context.args)
     try:
-        if verbose:
-            report = format_power_report()
-        else:
-            report = format_minimal_power_report()
+        report = format_power_report() if verbose else format_minimal_power_report()
         await msg.edit_text(report, parse_mode="Markdown")
     except Exception as e:
         await msg.edit_text(f"❌ Error: `{e}`", parse_mode="Markdown")
 
 
-# --- /ip command ---
-@restricted
-async def ip(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("🌍 Fetching public IP…")
-    try:
-        ip = get_ip_address()
-        await msg.edit_text(f"🌐 IP Address: `{ip}`", parse_mode="Markdown")
-    except Exception as e:
-        await msg.edit_text(f"❌ Error: {e}")
-
-
-# --- /ping command ---
 @restricted
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🏓 Pinging Telegram API…")
-    old_time = time.time()
+    start_time = time.time()
     r.get("https://api.telegram.org", timeout=5)
-    ping_time = round((time.time() - old_time) * 1000, 3)
+    ping_time = round((time.time() - start_time) * 1000, 3)
 
     uptime_seconds = int(time.time() - psutil.boot_time())
-    days = uptime_seconds // 86400
-    hours = (uptime_seconds % 86400) // 3600
-    minutes = (uptime_seconds % 3600) // 60
-    uptime_fmt = f"{days}d {hours}h {minutes}m"
+    d, rem = divmod(uptime_seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
 
     await msg.edit_text(
-        f"🏓 Pong: `{ping_time}ms`\n🕒 Uptime: `{uptime_fmt}`", parse_mode="Markdown"
+        f"🏓 Pong: `{ping_time}ms`\n🕒 Uptime: `{d}d {h}h {m}m`", parse_mode="Markdown"
     )
 
 
-# --- /stats command with -live support ---
 @restricted
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    live = len(context.args) > 0 and "-live" in context.args
-
-    async def render_chart_bytes(
-        cpu_pct: float, mem_pct: float, disk_pct: float
-    ) -> bytes:
-        plt.style.use("seaborn-v0_8-whitegrid")
-        fig, (ax_bar, ax_pie) = plt.subplots(
-            1, 2, figsize=(7.5, 3.5), gridspec_kw={"width_ratios": [1.1, 1.0]}
-        )
-        fig.suptitle("System Resource Usage", fontsize=12)
-
-        # bar for CPU and disk usage
-        labels = ["CPU", "Disk"]
-        values = [cpu_pct, disk_pct]
-        colors = ["#4CAF50", "#FFC107"]
-        ax_bar.bar(labels, values, color=colors)
-        ax_bar.set_ylim(0, 100)
-        ax_bar.set_ylabel("%")
-        for i, v in enumerate(values):
-            ax_bar.text(
-                i, min(100, v + 2), f"{v:.1f}%", ha="center", va="bottom", fontsize=9
-            )
-        ax_bar.grid(True, axis="y", linestyle="--", alpha=0.5)
-
-        # pie chart for ram (used vs free)
-        used = max(0.0, min(100.0, mem_pct))
-        free = max(0.0, 100.0 - used)
-        ax_pie.pie(
-            [used, free],
-            labels=["Used", "Free"],
-            colors=["#2196F3", "#B0BEC5"],
-            autopct=lambda p: f"{p:.1f}%",
-            startangle=90,
-            counterclock=False,
-            wedgeprops={"linewidth": 1, "edgecolor": "white"},
-            pctdistance=0.75,
-        )
-        ax_pie.set_title("Memory")
-
-        buf = BytesIO()
-        plt.tight_layout()
-        plt.savefig(buf, format="png", bbox_inches="tight", dpi=150)
-        plt.close(fig)
-        return buf.getvalue()
-
-    def make_caption(i: int, n: int, cpu: float, mem: float, disk: float) -> str:
-        return f"📡 Live {i}/{n}\nCPU: {cpu:.1f}% | RAM: {mem:.1f}% | Disk: {disk:.1f}%"
-
-    if not live:
-        cpu = system_stats["cpu"]
-        mem = system_stats["mem"]
-        disk = system_stats["disk"]
-        img_bytes = await render_chart_bytes(cpu, mem, disk)
-        await update.message.reply_photo(
-            photo=InputFile(img_bytes, filename="stats.png"),
-            caption=f"CPU: {cpu:.1f}% | RAM: {mem:.1f}% | Disk: {disk:.1f}%",
-        )
-        return
-
-    # Live system stats, run for 10 updates
-    total = 10
-    cpu = system_stats["cpu"]
-    mem = system_stats["mem"]
-    disk = system_stats["disk"]
-    img_bytes = await render_chart_bytes(cpu, mem, disk)
-    photo_msg = await update.effective_message.reply_photo(
+    cpu = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory().percent
+    disk = psutil.disk_usage("/").percent
+    img_bytes = await _stats_render_chart_bytes(cpu, mem, disk)
+    await update.message.reply_photo(
         photo=InputFile(img_bytes, filename="stats.png"),
-        caption=make_caption(1, total, cpu, mem, disk),
+        caption=f"CPU: {cpu:.1f}% | RAM: {mem:.1f}% | Disk: {disk:.1f}%",
     )
 
-    for i in range(2, total + 1):
-        await asyncio.sleep(1)
-        cpu = system_stats["cpu"]
-        mem = system_stats["mem"]
-        disk = system_stats["disk"]
-        img_bytes = await render_chart_bytes(cpu, mem, disk)
-        media = InputMediaPhoto(
-            media=img_bytes,
-            filename="stats.png",
-            caption=make_caption(i, total, cpu, mem, disk),
-        )
-        try:
-            await photo_msg.edit_media(media=media)
-        except BadRequest as e:
-            if "message to edit not found" in str(e).lower():
-                return
-            raise e
 
-    # mark as finished
-    try:
-        await photo_msg.edit_caption("✅ Live monitoring finished.")
-    except BadRequest:
-        pass
-
-
-# --- Shell and Python exec utilities ---
-def run(code: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> Any:
+# --- pyexec utilities ---
+def _pyexec_run(code: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> Any:
     command = "".join(f"\n    {x}" for x in code.split("\n"))
     exec_locals = {}
     exec(f"def func(update, context):{command}", globals(), exec_locals)
     return exec_locals["func"](update, context)
 
 
-def try_and_catch(func: Callable, *args: Any, **kwargs: Any) -> str:
+def _pyexec_try_and_catch(func: Callable, *args: Any, **kwargs: Any) -> str:
     try:
         output = func(*args, **kwargs)
     except Exception as exc:
@@ -865,7 +741,9 @@ def try_and_catch(func: Callable, *args: Any, **kwargs: Any) -> str:
     return output
 
 
-# --- /pyexec command ---
+# ------------------------
+
+
 @restricted
 async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🐍 Running Python code…")
@@ -875,7 +753,7 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.edit_text("❌ No code provided.")
     old_stdout = sys.stdout
     redirected = sys.stdout = io.StringIO()
-    errors = try_and_catch(run, code, update, context)
+    errors = _pyexec_try_and_catch(_pyexec_run, code, update, context)
     sys.stdout = old_stdout
     output = redirected.getvalue()
     text = "<b>OUTPUT</b>:\n"
@@ -890,39 +768,38 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(text, parse_mode="HTML")
 
 
-# --- /shell command ---
-def run_shell(command: str) -> str:
+# --- shell utilities ---
+def _shell_exec(command: str) -> str:
     command = command.strip()
     if not command:
         raise ValueError("Empty command")
 
     parts = shlex.split(command)
-
     if any(p in SHELL_DENYLIST for p in parts):
         raise PermissionError("Blocked command")
 
-    proc = subprocess.run(
-        parts,
-        capture_output=True,
-        text=True,
-        timeout=SHELL_TIMEOUT,
-    )
-
-    output = (proc.stdout or "") + (proc.stderr or "")
-    return output[-SHELL_MAX_OUTPUT:] or "No output."
+    try:
+        proc = subprocess.run(
+            parts, capture_output=True, text=True, timeout=SHELL_TIMEOUT
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        return output[-SHELL_MAX_OUTPUT:] or "No output."
+    except subprocess.TimeoutExpired:
+        raise
+    except Exception as e:
+        return f"Execution Error: {str(e)}"
 
 
 @restricted
 async def shell(update: Update, _: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("💻 Running shell command…")
-
     try:
         cmd = update.message.text.split(None, 1)[1]
     except IndexError:
         return await msg.edit_text("❌ No command provided.")
 
     try:
-        output = run_shell(cmd)
+        output = _shell_exec(cmd)
         await msg.edit_text(f"<pre>{escape(output)}</pre>", parse_mode="HTML")
     except PermissionError as e:
         await msg.edit_text(f"🚫 {escape(str(e))}", parse_mode="HTML")
@@ -934,20 +811,29 @@ async def shell(update: Update, _: ContextTypes.DEFAULT_TYPE):
 
 # ============= Main Application =============
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(JobQueue()).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help))
-    app.add_handler(CommandHandler("fetch", fetch))
-    app.add_handler(CommandHandler("dockerps", dockerps))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("shell", shell))
-    app.add_handler(CommandHandler("pyexec", pyexec))
-    app.add_handler(CommandHandler("powerc", powerc))
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN not set.")
+        return
 
-    app.job_queue.run_repeating(stats_sampler_job, interval=1.0, first=0.0)
-    app.job_queue.run_once(notify_boot_job, when=1)
-    app.job_queue.run_repeating(watchdog_job, interval=300, first=30)
+    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(JobQueue()).build()
+
+    handlers = [
+        ("start", start),
+        ("help", help),
+        ("fetch", fetch),
+        ("dockerps", dockerps),
+        ("ping", ping),
+        ("stats", stats),
+        ("shell", shell),
+        ("pyexec", pyexec),
+        ("powerc", powerc),
+    ]
+
+    for name, handler in handlers:
+        app.add_handler(CommandHandler(name, handler))
+
+    app.job_queue.run_once(notify_boot_job, when=0.5)
+    app.job_queue.run_repeating(watchdog_job, interval=60, first=30)
 
     print("🤖 Bot is running…")
     app.run_polling()
