@@ -164,15 +164,6 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 # ============= OS info utilities =============
 
 
-def get_ip_address():
-    try:
-        response = r.get("https://api.ipify.org", timeout=5)
-        response.raise_for_status()
-        return response.text.strip()
-    except Exception:
-        return "Unavailable"
-
-
 def run_fastfetch(include_ip: bool = False) -> str:
     base_structure = (
         "Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:"
@@ -351,9 +342,11 @@ def format_minimal_power_report():
     """
     Prints a minimal power/thermal summary.
     """
-    rails, total = parse_pmic()
+    _, total = parse_pmic()
     temp = get_temp()
-    return f"Power: {total:.3f} W | CPU Temp: {temp:.1f}°C"
+    fan_cur, fan_max = get_fan()
+    pct = (fan_cur / fan_max * 100) if fan_max else 0
+    return f"Power: `{total:.3f} W` | CPU Temp: `{temp:.1f}°C` | Fan: `{pct:.0f}%`"
 
 
 # ============= Docker Utils =================
@@ -541,6 +534,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     total_lines = sum(row_line_counts)
     fig_h = max(3.0, total_lines * base_row_h) + 0.5
     fig_w = 14.5
+
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
     ax.set_position([0, 0, 1, 1])
@@ -558,6 +552,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     ]
 
     col_widths = [0.05, 0.16, 0.22, 0.10, 0.09, 0.38]
+
     tbl = ax.table(
         cellText=data,
         cellLoc="left",
@@ -614,7 +609,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     bbox_final = bbox_inches.expanded(1.01, 1.01)
 
     buf = BytesIO()
-    # SetDPI to 250 for crisper text rendering
+    # 3. FIX: Increased DPI to 250 for crisper text rendering
     fig.savefig(buf, format="png", dpi=250, bbox_inches=bbox_final, pad_inches=0)
     plt.close(fig)
     return buf.getvalue()
@@ -624,6 +619,7 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
 
 
 # --- /start command ---
+@restricted
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_owner = bool(user and user.id in OWNER_IDS)
@@ -634,12 +630,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I can provide system information and perform various tasks on this server.",
         "Use /help to see all available commands.",
     ]
-
-    # if not is_owner:
-    #    lines.append(f"I’m owned and operated by @{OWNER_USERNAME}.")
-    #    lines.append(
-    #        'You can self-host me too — see the source on <a href="https://github.com/starry-shivam/server-monitor-bot">GitHub</a>.'
-    #    )
 
     text = "\n\n".join(lines)
     await update.message.reply_text(
@@ -653,15 +643,11 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lines = [
         f"Hello {user.first_name}! Here are the available commands:\n",
-        "<code>/info</code> — System info (Neofetch-like)",
-        "<code>/info -ip</code> — Include IP address",
+        "<code>/fetch</code> — System info via Fastfetch (-ip: Include local IP)",
         "<code>/dockerps</code> — Sends table of docker containers and their status",
-        "<code>/cputemp</code> — CPU temperature (Pi only)",
-        "<code>/powerc</code> — Pi5 power usage / fan / voltage",
-        "<code>/stats</code> — Show CPU/RAM/Disk usage",
-        "<code>/stats -live</code> — Live system monitor",
+        "<code>/powerc</code> — Pi5 power usage / fan / voltage (-v: Verbose output)",
+        "<code>/stats</code> — Show CPU/RAM/Disk usage (-live: Show live metrucs for 10 secs)",
         "<code>/ping</code> — Measure API latency",
-        "<code>/ip</code> — Get server public IP",
         "<code>/shell</code> — Run shell commands",
         "<code>/pyexec</code> — Run Python code",
     ]
@@ -673,7 +659,7 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
 
 # --- /info command ---
 @restricted
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🛰 Gathering system info…")
     include_ip = len(context.args) > 0 and "-ip" in context.args
     text = run_fastfetch(include_ip=include_ip)
@@ -721,31 +707,15 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 
-# --- /cputemp command ---
 @restricted
-async def cputemp(update: Update, _: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("🌡 Reading CPU temperature…")
-    try:
-        temps = psutil.sensors_temperatures()
-        if not temps:
-            await msg.edit_text("❌ No temperature sensors found.")
-            return
-
-        for name, entries in temps.items():
-            for entry in entries:
-                if entry.current:
-                    await msg.edit_text(f"🌡 CPU Temperature: {entry.current:.1f}°C")
-                    return
-        await msg.edit_text("❌ Could not read temperature values.")
-    except Exception as e:
-        await msg.edit_text(f"❌ Error: {e}")
-
-
-@restricted
-async def powerc(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
+    verbose = len(context.args) > 0 and "-v" in context.args
     try:
-        report = format_power_report()
+        if verbose:
+            report = format_power_report()
+        else:
+            report = format_minimal_power_report()
         await msg.edit_text(report, parse_mode="Markdown")
     except Exception as e:
         await msg.edit_text(f"❌ Error: `{e}`", parse_mode="Markdown")
@@ -967,10 +937,8 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).job_queue(JobQueue()).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help))
-    app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("fetch", fetch))
     app.add_handler(CommandHandler("dockerps", dockerps))
-    app.add_handler(CommandHandler("cputemp", cputemp))
-    app.add_handler(CommandHandler("ip", ip))
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("shell", shell))
