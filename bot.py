@@ -796,8 +796,8 @@ async def shell(update: Update, _: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.edit_text(f"❌ {escape(str(e))}", parse_mode="HTML")
 
-
 # ============= Main Application =============
+
 def main():
     if not BOT_TOKEN:
         print("Error: BOT_TOKEN not set.")
@@ -820,16 +820,19 @@ def main():
     for name, handler in handlers:
         app.add_handler(CommandHandler(name, handler))
 
-    app.job_queue.run_once(notify_boot_job, when=0.5)
+    app.job_queue.run_once(
+        notify_boot_job,
+        when=0.5,
+        job_kwargs={"misfire_grace_time": None}
+    )
     app.job_queue.run_repeating(
         watchdog_job,
         interval=60, first=30,
-        job_kwargs={"misfire_grace_time": None}
+        job_kwargs={"misfire_grace_time": 5}
     )
 
     print("🤖 Bot is running…")
     app.run_polling()
-
 
 if __name__ == "__main__":
     try:
