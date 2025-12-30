@@ -129,8 +129,8 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
     mem_pct = psutil.virtual_memory().percent
 
-    # CPU temp alert (65°C) - Cooldown 2 hours
-    if temp_c > 65 and (now - last_alert["temp"] > 7200):
+    # CPU temp alert (65°C) - Cooldown 30 mins
+    if temp_c > 65 and (now - last_alert["temp"] > 1800):
         last_alert["temp"] = now
         await bot.send_message(
             chat_id=LOG_CHANNEL_ID,
@@ -138,8 +138,8 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # RAM alert (80%) - Cooldown 2 hours
-    if mem_pct > 80 and (now - last_alert["ram"] > 7200):
+    # RAM alert (80%) - Cooldown 30 mins
+    if mem_pct > 80 and (now - last_alert["ram"] > 1800):
         last_alert["ram"] = now
         await bot.send_message(
             chat_id=LOG_CHANNEL_ID,
@@ -796,8 +796,8 @@ async def shell(update: Update, _: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.edit_text(f"❌ {escape(str(e))}", parse_mode="HTML")
 
-# ============= Main Application =============
 
+# ============= Main Application =============
 def main():
     if not BOT_TOKEN:
         print("Error: BOT_TOKEN not set.")
@@ -833,6 +833,7 @@ def main():
 
     print("🤖 Bot is running…")
     app.run_polling()
+
 
 if __name__ == "__main__":
     try:
