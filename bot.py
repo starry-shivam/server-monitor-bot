@@ -48,7 +48,7 @@ from typing import Any, Callable
 from pathlib import Path
 from html import escape
 
-from telegram import Update, InputFile, Message
+from telegram import Update, Message, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
 # --- Configuration ---
@@ -156,7 +156,7 @@ def run_fastfetch(include_ip: bool = False) -> str:
         "Title","Separator","OS","Host","Kernel","Uptime","Packages","Shell","Display","DE","WM","Theme",
         "Icons","Font","Terminal","CPU","GPU","Memory","Swap","Disk","Battery","Locale","Break",
     ]
-
+    
     if include_ip:
         # Insert 'LocalIp' after 'Disk'
         try:
@@ -637,40 +637,29 @@ async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_photo(
+        photo="https://i.postimg.cc/5tsLpZd0/IMG-20251230-191259.jpg",
+        caption="🔍 Inspecting available containers...",
+    )
     try:
         rows = _collect_docker_containers()
-    except RuntimeError as e:
-        await update.message.reply_text(f"❌ {escape(str(e))}", parse_mode="HTML")
-        return
-    except Exception as e:
-        await update.message.reply_text(
-            f"❌ Unexpected error: {escape(str(e))}", parse_mode="HTML"
-        )
-        return
-
-    if not rows:
-        await update.message.reply_text("🐳 No containers found.", parse_mode="HTML")
-        return
-
-    msg = await update.message.reply_text("🔍 Inspecting available containers...")
-    try:
+        if not rows:
+            raise RuntimeError("No containers found.")
         img_bytes = _render_docker_table_image(rows)
-        await update.message.reply_photo(
-            photo=InputFile(img_bytes, filename="docker_containers.png"),
-            caption="🐳 Docker Containers",
-        )
-        await msg.delete()
-    except Exception as e:
-        # Fallback to text file
-        try:
-            payload = str(rows)  # Simple fallback since image gen failed
-            await update.message.reply_document(
-                io.BytesIO(payload.encode()),
-                filename="docker_error_dump.txt",
-                caption=f"❌ Image Render Failed: {e}",
+
+        await msg.edit_media(
+            media=InputMediaPhoto(
+                media=img_bytes,
+                caption="🐳 Docker Containers",
             )
-        except Exception:
-            pass
+        )
+    except Exception as err:
+        await msg.edit_media(
+            media=InputMediaPhoto(
+                media="https://i.postimg.cc/4d7k0rdX/IMG-20251230-195209.jpg",
+                caption=f"❌ {err}",
+            )
+        )
 
 
 @restricted
@@ -708,7 +697,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage("/").percent
     img_bytes = await _stats_render_chart_bytes(cpu, mem, disk)
     await update.message.reply_photo(
-        photo=InputFile(img_bytes, filename="stats.png"),
+        photo=img_bytes,
         caption=f"CPU: {cpu:.1f}% | RAM: {mem:.1f}% | Disk: {disk:.1f}%",
     )
 
@@ -821,14 +810,10 @@ def main():
         app.add_handler(CommandHandler(name, handler))
 
     app.job_queue.run_once(
-        notify_boot_job,
-        when=0.5,
-        job_kwargs={"misfire_grace_time": None}
+        notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}
     )
     app.job_queue.run_repeating(
-        watchdog_job,
-        interval=60, first=30,
-        job_kwargs={"misfire_grace_time": 5}
+        watchdog_job, interval=60, first=30, job_kwargs={"misfire_grace_time": 5}
     )
 
     print("🤖 Bot is running…")
