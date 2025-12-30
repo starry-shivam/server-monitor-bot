@@ -716,8 +716,6 @@ def _pyexec_try_and_catch(func: Callable, *args: Any, **kwargs: Any) -> str:
     except Exception as exc:
         output = "".join(traceback.format_exception(None, exc, exc.__traceback__))
     return output
-
-
 # ------------------------
 
 
@@ -765,6 +763,7 @@ def _shell_exec(command: str) -> str:
         raise
     except Exception as e:
         return f"Execution Error: {str(e)}"
+# ------------------------
 
 
 @restricted
