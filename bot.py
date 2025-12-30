@@ -48,7 +48,7 @@ from typing import Any, Callable
 from pathlib import Path
 from html import escape
 
-from telegram import Update, Message, InputMediaPhoto
+from telegram import Update, Message, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
 # --- Configuration ---
@@ -546,10 +546,10 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-# ============= Stats Utils =============
+# ============= Metrics Utils =============
 
 
-async def _stats_render_chart_bytes(
+async def _metrics_render_chart(
     cpu_pct: float, mem_pct: float, disk_pct: float
 ) -> bytes:
     plt.style.use("seaborn-v0_8-whitegrid")
@@ -617,7 +617,7 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
         "‣ <code>/fetch</code> — Display system information using Fastfetch (-ip: include local IP)",
         "‣ <code>/dockerps</code> — Show a table of Docker containers and their statuses",
         "‣ <code>/powerc</code> — Display Pi 5 power usage, fan speed, and voltage (-v: verbose output)",
-        "‣ <code>/stats</code> — Visually display CPU, RAM, and disk usage",
+        "‣ <code>/metrics</code> — Visually display CPU, RAM, and disk usage",
         "‣ <code>/ping</code> — Measure Telegram bot API latency",
         "‣ <code>/shell</code> — Execute shell commands",
         "‣ <code>/pyexec</code> — Execute Python code",
@@ -691,14 +691,26 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def metrics(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cpu = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory().percent
     disk = psutil.disk_usage("/").percent
-    img_bytes = await _stats_render_chart_bytes(cpu, mem, disk)
+
+    img_bytes = await _metrics_render_chart(cpu, mem, disk)
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                text="📊 Live metrics",
+                url="https://rpi-metrics.pn.krsh.dev"
+            )
+        ]
+    ])
+
     await update.message.reply_photo(
         photo=img_bytes,
         caption=f"CPU: {cpu:.1f}% | RAM: {mem:.1f}% | Disk: {disk:.1f}%",
+        reply_markup=keyboard,
     )
 
 
@@ -799,7 +811,7 @@ def main():
         ("fetch", fetch),
         ("dockerps", dockerps),
         ("ping", ping),
-        ("stats", stats),
+        ("metrics", metrics),
         ("shell", shell),
         ("pyexec", pyexec),
         ("powerc", powerc),
