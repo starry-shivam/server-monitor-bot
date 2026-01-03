@@ -365,7 +365,7 @@ def _format_ports(ports: dict | None) -> str:
 
 
 def _collect_docker_containers() -> list[dict]:
-    # Optimization: Get all IDs first
+    # Get all IDs first
     raw = _run_cmd(["docker", "ps", "-a", "--format", "{{.ID}}"])
     ids = [x for x in raw.splitlines() if x.strip()]
     if not ids:
@@ -373,8 +373,7 @@ def _collect_docker_containers() -> list[dict]:
 
     containers = []
     now = datetime.datetime.now(datetime.timezone.utc)
-
-    # Optimization: Single inspect call for ALL containers (O(1) instead of O(N))
+    # Single inspect call for ALL containers
     fmt = "{{.Name}}|{{.Config.Image}}|{{.State.Status}}|{{.State.StartedAt}}|{{json .NetworkSettings.Ports}}"
 
     # Run inspect on all IDs at once
@@ -441,8 +440,8 @@ def _wrap_text(s: str, width: int) -> str:
 
 def _render_docker_table_image(rows: list[dict]) -> bytes:
     rows = sorted(rows, key=lambda x: x["name"].lower())
-
-    # Matplotlib optimization: State machine management
+    
+    # Set custom font instead of default dejavu
     plt.rcParams["font.family"] = "sans-serif"
 
     headers = ["S. No", "Name", "Image", "Status", "Uptime", "Ports"]
@@ -604,9 +603,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I can provide system information and perform various tasks on this server.\n\n"
         "Use /help to see all available commands."
     )
-    await update.message.reply_text(
-        text, parse_mode="HTML", disable_web_page_preview=True
-    )
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 @restricted
@@ -832,7 +829,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n🛑 Bot stopped.")
+    main()
