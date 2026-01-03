@@ -635,7 +635,7 @@ async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_photo(
-        photo="https://i.postimg.cc/5tsLpZd0/IMG-20251230-191259.jpg",
+        photo="https://i.postimg.cc/Cx72g78F/IMG-20251231-160224.jpg",
         caption="🔍 Inspecting available containers...",
     )
     try:
