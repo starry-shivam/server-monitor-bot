@@ -37,6 +37,9 @@ import shlex
 import requests as r
 import psutil
 import matplotlib
+import hmac
+import hashlib
+import base64
 
 # Set backend to Agg for headless environments (prevents GUI errors/leaks)
 matplotlib.use("Agg")
@@ -48,27 +51,63 @@ from typing import Any, Callable
 from pathlib import Path
 from html import escape
 
-from telegram import Update, Message, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
+from telegram import (
+    Update,
+    Message,
+    InputMediaPhoto,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    JobQueue,
+)
 
 # --- Configuration ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()}
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
+BOT_START_TIME = time.time()
 
+# --- Shell Config ---
 SHELL_DENYLIST = {
-    "sudo","rm","mv","shutdown","reboot","init", "systemctl",
-    "service","bash","zsh","sh", "source","pkill","killall",
+    "sudo",
+    "rm",
+    "mv",
+    "shutdown",
+    "reboot",
+    "init",
+    "systemctl",
+    "service",
+    "bash",
+    "zsh",
+    "sh",
+    "source",
+    "pkill",
+    "killall",
 }
 SHELL_TIMEOUT = 10  # seconds
 SHELL_MAX_OUTPUT = 3600
-
-BOT_START_TIME = time.time()
 
 # --- Pre-compiled Regex ---
 RE_PMIC_CURRENT = re.compile(r"(\S+)_A.*?=([\d.]+)A")
 RE_PMIC_VOLTAGE = re.compile(r"(\S+)_V.*?=([\d.]+)V")
 RE_THROTTLE_HEX = re.compile(r"0x([0-9A-Fa-f]+)")
+
+# --- Docker action config ---
+DOCKER_APPS_DIR = Path("/home/starry/docker-apps")
+DC_SCRIPT = "dc_action.sh"
+DC_ALLOWED_ACTIONS = {"up", "stop"}
+DC_IGNORE_DIRS = {"tdl-go"}
+DC_CALLBACK_TTL = 30  # seconds
+
+# Sign callback data to prevent malicious client attacks
+DC_CALLBACK_SECRET = os.getenv("DC_CALLBACK_SECRET")
+if not DC_CALLBACK_SECRET:
+    raise RuntimeError("DC_CALLBACK_SECRET not set")
 
 
 # --- Restriction decorator (owner-only) ---
@@ -153,10 +192,31 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
 def run_fastfetch(include_ip: bool = False) -> str:
     structure_parts = [
-        "Title","Separator","OS","Host","Kernel","Uptime","Packages","Shell","Display","DE","WM","Theme",
-        "Icons","Font","Terminal","CPU","GPU","Memory","Swap","Disk","Battery","Locale","Break",
+        "Title",
+        "Separator",
+        "OS",
+        "Host",
+        "Kernel",
+        "Uptime",
+        "Packages",
+        "Shell",
+        "Display",
+        "DE",
+        "WM",
+        "Theme",
+        "Icons",
+        "Font",
+        "Terminal",
+        "CPU",
+        "GPU",
+        "Memory",
+        "Swap",
+        "Disk",
+        "Battery",
+        "Locale",
+        "Break",
     ]
-    
+
     if include_ip:
         # Insert 'LocalIp' after 'Disk'
         try:
@@ -440,7 +500,7 @@ def _wrap_text(s: str, width: int) -> str:
 
 def _render_docker_table_image(rows: list[dict]) -> bytes:
     rows = sorted(rows, key=lambda x: x["name"].lower())
-    
+
     # Set custom font instead of default dejavu
     plt.rcParams["font.family"] = "sans-serif"
 
@@ -545,6 +605,132 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
+# ============= Docker Action =============
+
+
+COMPOSE_FILES = {
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+}
+
+
+def has_compose_file(dir_path: Path) -> bool:
+    return any((dir_path / f).exists() for f in COMPOSE_FILES)
+
+
+def list_docker_dirs() -> list[str]:
+    if not DOCKER_APPS_DIR.exists():
+        return []
+    return sorted(
+        d.name
+        for d in DOCKER_APPS_DIR.iterdir()
+        if d.is_dir() and d.name not in DC_IGNORE_DIRS
+    )
+
+
+def is_compose_running(dir_path: Path) -> bool:
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "ps", "-q", "--filter", "status=running"],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return bool(proc.stdout.strip())
+    except Exception:
+        return False
+
+
+def run_single_dc(action: str, name: str) -> str:
+    if action not in DC_ALLOWED_ACTIONS:
+        raise ValueError("Unsupported action")
+
+    dir_path = DOCKER_APPS_DIR / name
+
+    if not dir_path.exists():
+        raise FileNotFoundError("Directory does not exist")
+
+    if name in DC_IGNORE_DIRS:
+        raise PermissionError(f"`{name}` is ignored permanently")
+
+    if not has_compose_file(dir_path):
+        raise RuntimeError("No docker compose file found")
+
+    running = is_compose_running(dir_path)
+
+    # 🔎 State-based validation
+    if action == "up" and running:
+        raise RuntimeError("Containers are already running")
+
+    if action == "stop" and not running:
+        raise RuntimeError("Containers are already stopped")
+
+    # ▶ Execute
+    cmd = ["docker", "compose", action]
+    if action == "up":
+        cmd.append("-d")
+
+    proc = subprocess.run(
+        cmd,
+        cwd=dir_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return output.strip() or "No output."
+
+
+def run_bulk_dc(action: str) -> str:
+    if action not in DC_ALLOWED_ACTIONS:
+        raise ValueError("Unsupported action")
+
+    proc = subprocess.run(
+        ["bash", DC_SCRIPT, action],
+        cwd=DOCKER_APPS_DIR,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return output.strip() or "No output."
+
+
+def dc_sign(payload: str) -> str:
+    sig = hmac.new(
+        DC_CALLBACK_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).digest()
+    # shorten for Telegram (still cryptographically safe)
+    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+
+
+def dc_callback_data(
+    cb_type: str,
+    user_id: int,
+    ts: int,
+    action: str | None = None,
+    target: str | None = None,
+) -> str:
+    parts = [
+        "dc",
+        cb_type,
+        str(user_id),
+        str(ts),
+        action or "-",
+        target or "-",
+    ]
+    payload = ":".join(parts)
+    sig = dc_sign(payload)
+    return f"{payload}:{sig}"
+
+
 # ============= Metrics Utils =============
 
 
@@ -611,16 +797,26 @@ async def help(update: Update, _: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lines = [
         f"Hello {user.first_name}! Here are the available commands:\n",
-        "‣ <code>/fetch</code> — Display system information using Fastfetch (-ip: include local IP)",
-        "‣ <code>/dockerps</code> — Show a table of Docker containers and their statuses",
-        "‣ <code>/powerc</code> — Display Pi 5 power usage, fan speed, and voltage (-v: verbose output)",
-        "‣ <code>/metrics</code> — Visually display CPU, RAM, and disk usage",
-        "‣ <code>/ping</code> — Measure Telegram bot API latency",
+        "‣ <code>/fetch</code> — Display system information using Fastfetch",
+        "‣ <code>/dockerps</code> — Show Docker containers",
+        "‣ <code>/powerc</code> — Display Pi 5 power usage",
+        "‣ <code>/metrics</code> — Visual CPU, RAM, disk usage",
+        "‣ <code>/ping</code> — Measure Telegram API latency",
         "‣ <code>/shell</code> — Execute shell commands",
         "‣ <code>/pyexec</code> — Execute Python code",
+        "",
+        "‣ <code>/dcaction</code> — Manage Docker Compose apps",
+        "    ├ <code>/dcaction list</code>",
+        "    ├ <code>/dcaction up &lt;dir&gt;</code>",
+        "    ├ <code>/dcaction stop &lt;dir&gt;</code>",
+        "    ├ <code>/dcaction up --all</code>",
+        "    └ <code>/dcaction stop --all</code>",
     ]
+
     await update.message.reply_text(
-        "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True
+        "\n".join(lines),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 
@@ -660,6 +856,184 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
+async def dcaction_list(update: Update, _: ContextTypes.DEFAULT_TYPE):
+    dirs = list_docker_dirs()
+
+    if not dirs:
+        return await update.message.reply_text("❌ No docker app directories found.")
+
+    text = "📦 *Available Docker Apps:*\n\n"
+    for i, d in enumerate(dirs, 1):
+        text += f"{i}. `{d}`\n"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+@restricted
+async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+
+    if not args:
+        return await update.message.reply_text(
+            "❌ Usage:\n"
+            "‣ `/dcaction up <dir>`\n"
+            "‣ `/dcaction stop <dir>`\n"
+            "‣ `/dcaction up --all`\n"
+            "‣ `/dcaction stop --all`\n"
+            "‣ `/dcaction list`",
+            parse_mode="Markdown",
+        )
+
+    if args[0] == "list":
+        return await dcaction_list(update, context)
+
+    action = args[0].lower()
+    if action not in DC_ALLOWED_ACTIONS:
+        return await update.message.reply_text("❌ Only `up` and `stop` are supported.")
+
+    is_all = "--all" in args
+    target = None if is_all else (args[1] if len(args) > 1 else None)
+
+    if not is_all:
+        if not target:
+            return await update.message.reply_text("❌ Missing directory name.")
+
+        if target in DC_IGNORE_DIRS:
+            return await update.message.reply_text(
+                f"🚫 `{target}` is in ignore list.",
+                parse_mode="Markdown",
+            )
+
+        dir_path = DOCKER_APPS_DIR / target
+        if not dir_path.exists():
+            return await update.message.reply_text(
+                f"❌ Directory `{target}` not found.\n"
+                f"Run `/dcaction list` to see available apps.",
+                parse_mode="Markdown",
+            )
+
+        if not has_compose_file(dir_path):
+            return await update.message.reply_text(
+                f"❌ `{target}` has no docker compose file.",
+                parse_mode="Markdown",
+            )
+
+    user_id = update.effective_user.id
+    ts = int(time.time())
+
+    preview = (
+        f"⚠️ *Confirm Docker Action*\n\n"
+        f"• Action: `{action}`\n"
+        f"• Target: `{target or 'ALL'}`\n\n"
+        "Proceed?"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Confirm",
+                    callback_data=dc_callback_data(
+                        "run",
+                        user_id,
+                        ts,
+                        action,
+                        target or "ALL",
+                    ),
+                ),
+                InlineKeyboardButton(
+                    "❌ Cancel",
+                    callback_data=dc_callback_data(
+                        "cancel",
+                        user_id,
+                        ts,
+                    ),
+                ),
+            ]
+        ]
+    )
+
+    await update.message.reply_text(
+        preview,
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+
+
+# No @restricted cause inbuilt validation
+async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    user = q.from_user
+    await q.answer()
+
+    parts = q.data.split(":")
+    if len(parts) != 7 or parts[0] != "dc":
+        return
+
+    (
+        _,
+        cb_type,
+        uid,
+        ts,
+        action,
+        target,
+        sig,
+    ) = parts
+
+    uid = int(uid)
+    ts = int(ts)
+    now = int(time.time())
+
+    # 🔐 Owner check
+    if user.id != uid or user.id not in OWNER_IDS:
+        return await q.answer("🚫 Unauthorized", show_alert=True)
+
+    # ⏳ Expiry check
+    if now - ts > DC_CALLBACK_TTL:
+        return await q.answer(
+            "⏱ This action has expired. Please run the command again.",
+            show_alert=True,
+        )
+
+    # 🔑 Signature check
+    payload = ":".join(parts[:-1])
+    expected_sig = dc_sign(payload)
+
+    if not hmac.compare_digest(sig, expected_sig):
+        return await q.answer(
+            "🚨 Invalid or tampered callback.",
+            show_alert=True,
+        )
+
+    # ❌ Cancel
+    if cb_type == "cancel":
+        return await q.edit_message_text("❌ Cancelled.")
+
+    # ▶ Run
+    await q.edit_message_text("🚀 Executing…")
+
+    try:
+        if target == "ALL":
+            output = run_bulk_dc(action)
+        else:
+            output = run_single_dc(action, target)
+
+        if len(output) > 3500:
+            output = output[-3500:]
+
+        await q.edit_message_text(
+            f"📊 *Execution Summary*\n\n```{output}```",
+            parse_mode="Markdown",
+        )
+
+    except Exception as e:
+        await q.edit_message_text(
+            f"❌ Error:\n`{e}`",
+            parse_mode="Markdown",
+        )
+
+
+@restricted
 async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
     verbose = bool(context.args and "-v" in context.args)
@@ -695,14 +1069,15 @@ async def metrics(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     img_bytes = await _metrics_render_chart(cpu, mem, disk)
 
-    keyboard = InlineKeyboardMarkup([
+    keyboard = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                text="📊 Live metrics",
-                url="https://rpi-metrics.pn.krsh.dev"
-            )
+            [
+                InlineKeyboardButton(
+                    text="📊 Live metrics", url="https://rpi-metrics.pn.krsh.dev"
+                )
+            ]
         ]
-    ])
+    )
 
     await update.message.reply_photo(
         photo=img_bytes,
@@ -725,6 +1100,8 @@ def _pyexec_try_and_catch(func: Callable, *args: Any, **kwargs: Any) -> str:
     except Exception as exc:
         output = "".join(traceback.format_exception(None, exc, exc.__traceback__))
     return output
+
+
 # ------------------------
 
 
@@ -772,6 +1149,8 @@ def _shell_exec(command: str) -> str:
         raise
     except Exception as e:
         return f"Execution Error: {str(e)}"
+
+
 # ------------------------
 
 
@@ -807,6 +1186,7 @@ def main():
         ("help", help),
         ("fetch", fetch),
         ("dockerps", dockerps),
+        ("dcaction", dcaction),
         ("ping", ping),
         ("metrics", metrics),
         ("shell", shell),
@@ -823,6 +1203,7 @@ def main():
     app.job_queue.run_repeating(
         watchdog_job, interval=60, first=30, job_kwargs={"misfire_grace_time": 5}
     )
+    app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
 
     print("🤖 Bot is running…")
     app.run_polling()
