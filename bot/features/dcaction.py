@@ -99,7 +99,7 @@ def run_single_dc(action: str, name: str) -> str:
             cwd=dir_path,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=1800,
             check=False,
         )
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
@@ -134,7 +134,7 @@ def run_bulk_dc(action: str) -> str:
         cwd=DOCKER_APPS_DIR,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=2200,
     )
 
     output = (proc.stdout or "") + (proc.stderr or "")
