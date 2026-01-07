@@ -198,7 +198,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = args[0].lower()
     if action not in DC_ALLOWED_ACTIONS:
         return await update.message.reply_text(
-            f"❌ Only {list(DC_ALLOWED_ACTIONS)} are supported."
+            f"❌ Supported actions: {', '.join(DC_ALLOWED_ACTIONS)}."
         )
 
     is_all = "--all" in args
@@ -273,7 +273,6 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     user = q.from_user
-    await q.answer()
 
     parts = q.data.split(":")
     if len(parts) != 7 or parts[0] != "dc":
@@ -306,10 +305,12 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             show_alert=True,
         )
 
+    await q.answer()  # Acknowledge callback
+
     if cb_type == "cancel":
         return await q.edit_message_text("❌ Cancelled.")
 
-    # ▶ Execute
+    # Execute action
     await q.edit_message_text("🐋 Executing…")
 
     try:

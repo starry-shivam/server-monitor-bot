@@ -14,7 +14,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
     JobQueue,
-    Defaults
+    Defaults,
 )
 
 from bot.auth import restricted

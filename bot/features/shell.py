@@ -87,6 +87,13 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IndexError:
         return await update.message.reply_text("❌ No command provided.")
 
+    # && is not supported by subprocess, except in a shell context
+    # i.e. subprocess.run("cmd1 && cmd2", shell=True), which is unsafe.
+    if "&&" in cmd or ";" in cmd:
+        return await update.message.reply_text(
+            "🚫 Multiple commands are not allowed. " "Please run one command at a time."
+        )
+
     user_id = update.effective_user.id
     ts = int(time.time())
 
@@ -122,7 +129,6 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     user = q.from_user
-    await q.answer()
 
     parts = q.data.split(":")
     if len(parts) != 6 or parts[0] != "sh":
@@ -152,6 +158,8 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🚨 Invalid or tampered callback.",
             show_alert=True,
         )
+
+    await q.answer()  # Acknowledge the callback to avoid "loading" state
 
     if cb_type == "cancel":
         return await q.edit_message_text("❌ Cancelled.")
