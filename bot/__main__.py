@@ -64,7 +64,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "    └ <code>/dcaction restart &lt;dir&gt;</code>",
     ]
 
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 @restricted
