@@ -77,6 +77,7 @@ def decode_throttle(hex_str: str) -> str:
     val = int(m.group(1), 16)
     flags = []
 
+    # Mapping of bit to message
     conditions = {
         0: "Under-voltage NOW",
         1: "Frequency capped NOW",
@@ -98,7 +99,7 @@ def decode_throttle(hex_str: str) -> str:
         if val & (1 << bit):
             flags.append(f"🟡 {msg} (bit {bit})")
 
-    return "\\n".join(flags) if flags else "🟢 All good — no throttling"
+    return "\n".join(flags) if flags else "🟢 All good — no throttling"
 
 
 # ================= Formatting =================
@@ -111,7 +112,7 @@ def format_power_report():
     throttle = get_throttle()
     decoded = decode_throttle(throttle)
 
-    lines = ["⚡ *Raspberry Pi 5 Power Report*\\n"]
+    lines = [f"⚡ *Raspberry Pi 5 Power Report*\n"]
     lines.append(f"🌡Temperature: `{temp:.1f}°C`")
 
     if fan_cur is not None and fan_max:
@@ -119,14 +120,15 @@ def format_power_report():
         lines.append(f"🌀 Fan: `{fan_cur}/{fan_max}` (`{pct:.0f}%`)")
 
     lines.append(f"🚨 Throttle: `{throttle}`")
-    lines.append(f"{decoded}\\n")
+    lines.append(f"{decoded}\n")
 
     lines.append("*Rails (A × V = W):*")
+    # Sort by Watts descending
     for rail, a, v, w in sorted(rails, key=lambda x: -x[3]):
         lines.append(f"`{rail:<10} {a:>5.3f}A × {v:>5.3f}V = {w:>5.3f}W`")
 
-    lines.append(f"\\n🔋 *Total Power*: `{total:.3f} W`")
-    return "\\n".join(lines)
+    lines.append(f"\n🔋 *Total Power*: `{total:.3f} W`")
+    return "\n".join(lines)
 
 
 def format_minimal_power_report():
@@ -134,9 +136,7 @@ def format_minimal_power_report():
     temp = get_temp()
     fan_cur, fan_max = get_fan()
     pct = (fan_cur / fan_max * 100) if fan_max else 0
-    return (
-        f"Power: `{total:.3f} W` | " f"CPU Temp: `{temp:.1f}°C` | " f"Fan: `{pct:.0f}%`"
-    )
+    return f"Power: `{total:.3f} W` | CPU Temp: `{temp:.1f}°C` | Fan: `{pct:.0f}%`"
 
 
 # ================= Handler =================
@@ -146,7 +146,6 @@ def format_minimal_power_report():
 async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
     verbose = bool(context.args and "-v" in context.args)
-
     try:
         report = format_power_report() if verbose else format_minimal_power_report()
         await msg.edit_text(report, parse_mode="Markdown")
