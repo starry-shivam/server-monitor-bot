@@ -25,7 +25,7 @@ SHUTDOWN_COUNTDOWN = 5  # seconds
 
 POWER_ACTIONS = {
     "reboot": {
-        "title": "🔁 Reboot Server",
+        "title": "🔁 <b>Reboot Server</b>",
         "summary": (
             "⚠️ <b>Reboot Server</b>\n\n"
             "‣ All services will restart\n"
@@ -35,7 +35,7 @@ POWER_ACTIONS = {
         "unit": "power-helper@reboot",
     },
     "poweroff": {
-        "title": "⏻ Power Off Server",
+        "title": "⚠️ <b>Power Off Server</b>",
         "summary": (
             "⚠️ <b>Power Off Server</b>\n\n"
             "‣ All services will stop\n"
@@ -159,7 +159,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             for i in range(SHUTDOWN_COUNTDOWN, 0, -1):
                 await q.edit_message_text(
-                    f"⚠️ <b>{meta['title']}</b>\n\n" f"Shutting down in <b>{i}</b>…",
+                    f"{meta['title']}\n\n" f"Shutting down in <b>{i}</b>…",
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(
                         [
