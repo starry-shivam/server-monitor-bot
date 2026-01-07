@@ -6,10 +6,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from bot.auth import restricted
 
-
 # --- Pre-compiled Regex ---
-RE_PMIC_CURRENT = re.compile(r"(\\S+)_A.*?=([\\d.]+)A")
-RE_PMIC_VOLTAGE = re.compile(r"(\\S+)_V.*?=([\\d.]+)V")
+RE_PMIC_CURRENT = re.compile(r"(\S+)_A.*?=([\d.]+)A")
+RE_PMIC_VOLTAGE = re.compile(r"(\S+)_V.*?=([\d.]+)V")
 RE_THROTTLE_HEX = re.compile(r"0x([0-9A-Fa-f]+)")
 
 
