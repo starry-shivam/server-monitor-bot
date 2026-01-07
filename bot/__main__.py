@@ -26,6 +26,7 @@ from bot.features.fetch import fetch
 from bot.features.dockerps import dockerps
 from bot.features.dcaction import dcaction, dcaction_callback
 from bot.features.powerc import powerc
+from bot.features.powerm import reboot, poweroff, power_callback
 from bot.features.metrics import metrics
 from bot.features.shell import shell
 from bot.features.shell import shell_callback
@@ -121,6 +122,7 @@ def main():
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
     app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
+    app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))
 
     app.job_queue.run_once(
         notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}

@@ -6,19 +6,18 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/starry/bots/server-monitor-bot
-ExecStart=/home/starry/bots/server-monitor-bot/venv/bin/python bot.py
+ExecStart=/home/starry/bots/server-monitor-bot/venv/bin/python -m bot
 Restart=always
 RestartSec=5
-Environment="BOT_TOKEN=your-token"
-Environment="OWNER_IDS=123456789,7265289396"
-Environment="OWNER_USERNAME=tg-username-without-@"
-Environment="LOG_CHANNEL_ID=-1003471087893"
 
-# Security hardening (Optional)
+# Security hardening
 User=starry
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths=/home/starry/.docker/buildx
+PrivateTmp=true
+SystemCallFilter=~@reboot @mount
 
 [Install]
 WantedBy=multi-user.target
