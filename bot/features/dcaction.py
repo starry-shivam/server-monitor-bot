@@ -117,8 +117,13 @@ def run_bulk_dc(action: str) -> str:
     if action not in DC_ALLOWED_ACTIONS:
         raise ValueError("Unsupported action")
 
+    cmd = ["bash", DC_SCRIPT, action, "--no-color"]
+    if DC_IGNORE_DIRS:
+        ignore_arg = ",".join(DC_IGNORE_DIRS)
+        cmd.extend(["--ignore", ignore_arg])
+
     proc = subprocess.run(
-        ["bash", DC_SCRIPT, action, "--no-color"],
+        cmd,
         cwd=DOCKER_APPS_DIR,
         capture_output=True,
         text=True,
