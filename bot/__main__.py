@@ -66,6 +66,9 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "    ├ <code>/dcaction stop &lt;dir&gt;</code>",
         "    ├ <code>/dcaction stop --all</code>",
         "    └ <code>/dcaction restart &lt;dir&gt;</code>",
+        "----------------------------------",
+        "‣ <code>/reboot</code> — Reboot the server",
+        "‣ <code>/poweroff</code> — Power off the server",
     ]
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -114,6 +117,8 @@ def main():
         "metrics": metrics,
         "shell": shell,
         "pyexec": pyexec,
+        "reboot": reboot,
+        "poweroff": poweroff,
     }
 
     for command, handler in COMMAND_HANDLERS.items():
