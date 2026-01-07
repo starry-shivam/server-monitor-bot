@@ -17,9 +17,10 @@ from bot.config import (
     SHELL_DENYLIST,
     SHELL_TIMEOUT,
     SHELL_MAX_OUTPUT,
+    CALLBACK_SIG_SECRET,
+    CALLBACK_TTL,
 )
 from bot.auth import restricted
-from bot.config import CALLBACK_SIG_SECRET
 
 
 # ================= Shell Utils =================
@@ -45,9 +46,6 @@ def _shell_exec(command: str) -> str:
 
 
 # ================= Callback Signing =================
-
-
-SHELL_CALLBACK_TTL = 30  # seconds
 
 
 def shell_sign(payload: str) -> str:
@@ -144,7 +142,7 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     # Expiry check
-    if now - ts > SHELL_CALLBACK_TTL:
+    if now - ts > CALLBACK_TTL:
         return await q.answer(
             "⏱ This action has expired.",
             show_alert=True,

@@ -14,7 +14,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from bot.auth import restricted
-from bot.config import CALLBACK_SIG_SECRET
+from bot.config import CALLBACK_SIG_SECRET, CALLBACK_TTL
 
 
 log = logging.getLogger(__name__)
@@ -22,7 +22,6 @@ log = logging.getLogger(__name__)
 # ================= Configuration =================
 
 SHUTDOWN_COUNTDOWN = 5  # seconds
-POWER_CALLBACK_TTL = 30  # seconds
 
 POWER_ACTIONS = {
     "reboot": {
@@ -130,7 +129,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     # TTL check
-    if now - ts > POWER_CALLBACK_TTL:
+    if now - ts > CALLBACK_TTL:
         return await q.answer("⏱ Action expired.", show_alert=True)
 
     # Signature check
