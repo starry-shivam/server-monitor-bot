@@ -100,13 +100,16 @@ def run_single_dc(action: str, name: str) -> str:
         )
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
 
-    if action == "restart":
+    if action == "restart":  # handle restart as down + up
         run_cmd(["docker", "compose", "down"])
-        run_cmd(["docker", "compose", "up", "-d"])
+        run_cmd(["docker", "compose", "up", "-d", "--no-build"])
+    elif action == "logs":  # limited to last 100 lines
+        cmd = ["docker", "compose", "logs", "--tail", "100"]
+        run_cmd(cmd)
     else:
         cmd = ["docker", "compose", action]
         if action == "up":
-            cmd.append("-d")
+            cmd.extend(["-d", "--no-build"])
         run_cmd(cmd)
 
     output = "".join(outputs).strip()
@@ -183,6 +186,11 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "‣ <code>/dcaction up --all</code>\n"
             "‣ <code>/dcaction stop &lt;dir&gt;</code>\n"
             "‣ <code>/dcaction stop --all</code>\n"
+            "‣ <code>/dcaction pause &lt;dir&gt;</code>\n"
+            "‣ <code>/dcaction pause --all</code>\n"
+            "‣ <code>/dcaction unpause &lt;dir&gt;</code>\n"
+            "‣ <code>/dcaction unpause --all</code>\n"
+            "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
             "‣ <code>/dcaction restart &lt;dir&gt;</code>",
             parse_mode="HTML",
         )

@@ -37,9 +37,20 @@ SHELL_TIMEOUT = int(os.getenv("SHELL_TIMEOUT", "45"))  # seconds
 SHELL_MAX_OUTPUT = int(os.getenv("SHELL_MAX_OUTPUT", "3600"))
 
 # --- Docker action config ---
-DC_ALLOWED_ACTIONS = {"up", "stop", "pull", "build", "restart"}
+DC_ALLOWED_ACTIONS = {
+    "up",
+    "stop",
+    "pull",
+    "build",
+    "restart",
+    "logs",
+    "pause",
+    "unpause",
+}
 DOCKER_APPS_DIR = Path(os.getenv("DOCKER_APPS_DIR", "/home/starry/docker-apps"))
-DC_SCRIPT = os.getenv(
-    "DC_SCRIPT", "dc_action.sh"
-)  # Should be located in docker apps dir
-DC_IGNORE_DIRS = set(os.getenv("DC_IGNORE_DIRS", "").split(","))
+# Should be located in docker apps dir
+DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
+# Comma-separated list of directory names to ignore
+DC_IGNORE_DIRS = [
+    x.strip() for x in os.getenv("DC_IGNORE_DIRS", "").split(",") if x.strip()
+]
