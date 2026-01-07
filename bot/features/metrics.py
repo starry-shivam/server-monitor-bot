@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.auth import restricted
+from bot.config import LIVE_METRICS_URL
 
 
 async def _metrics_render_chart(
@@ -68,17 +69,19 @@ async def metrics(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disk = psutil.disk_usage("/").percent
 
     img_bytes = await _metrics_render_chart(cpu, mem, disk)
+    keyboard = None
 
-    keyboard = InlineKeyboardMarkup(
-        [
+    if LIVE_METRICS_URL:
+        keyboard = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton(
-                    text="📊 Live metrics",
-                    url="https://rpi-metrics.pn.krsh.dev",
-                )
+                [
+                    InlineKeyboardButton(
+                        text="📊 Live metrics",
+                        url=LIVE_METRICS_URL,
+                    )
+                ]
             ]
-        ]
-    )
+        )
 
     await update.message.reply_photo(
         photo=img_bytes,

@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 
 from bot.auth import restricted
-from bot.config import BOT_TOKEN, OWNER_IDS
+from bot.config import BOT_TOKEN, POWER_MGMT_AVAILABLE
 from bot.jobs import notify_boot_job, watchdog_job
 
 # Feature handlers (will exist next)
@@ -71,10 +71,16 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "    ├ <code>/dcaction unpause --all</code>",
         "    ├ <code>/dcaction logs &lt;dir&gt;</code>",
         "    └ <code>/dcaction restart &lt;dir&gt;</code>",
-        "----------------------------------",
-        "‣ <code>/reboot</code> — Reboot the server",
-        "‣ <code>/poweroff</code> — Power off the server",
     ]
+
+    if POWER_MGMT_AVAILABLE:
+        lines.extend(
+            [
+                "----------------------------------",
+                "‣ <code>/reboot</code> — Reboot the server",
+                "‣ <code>/poweroff</code> — Power off the server",
+            ]
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -122,9 +128,15 @@ def main():
         "metrics": metrics,
         "shell": shell,
         "pyexec": pyexec,
-        "reboot": reboot,
-        "poweroff": poweroff,
     }
+
+    if POWER_MGMT_AVAILABLE:
+        COMMAND_HANDLERS.update(
+            {
+                "reboot": reboot,
+                "poweroff": poweroff,
+            }
+        )
 
     for command, handler in COMMAND_HANDLERS.items():
         app.add_handler(CommandHandler(command, handler))
@@ -132,7 +144,9 @@ def main():
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
     app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
-    app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))
+
+    if POWER_MGMT_AVAILABLE:
+        app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))
 
     app.job_queue.run_once(
         notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}

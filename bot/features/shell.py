@@ -4,6 +4,8 @@ import time
 import hmac
 import hashlib
 import base64
+import secrets
+from enum import Enum
 from html import escape
 
 from telegram import (
@@ -21,6 +23,39 @@ from bot.config import (
     CALLBACK_TTL,
 )
 from bot.auth import restricted
+
+
+# ================= In-Memory Command Store =================
+
+_SHELL_PENDING: dict[str, dict] = {}
+
+
+class CmdStatus(str, Enum):
+    OK = "ok"
+    EXPIRED = "expired"
+    NOT_FOUND = "not_found"
+
+
+def store_command(cmd_id: str, command: str):
+    _SHELL_PENDING[cmd_id] = {
+        "command": command,
+        "ts": int(time.time()),
+    }
+
+
+def pop_command(cmd_id: str, ttl: int) -> tuple[CmdStatus, str | None]:
+    entry = _SHELL_PENDING.get(cmd_id)
+
+    if not entry:
+        return CmdStatus.NOT_FOUND, None
+
+    now = int(time.time())
+    if now - entry["ts"] > ttl:
+        _SHELL_PENDING.pop(cmd_id, None)
+        return CmdStatus.EXPIRED, None
+
+    _SHELL_PENDING.pop(cmd_id, None)
+    return CmdStatus.OK, entry["command"]
 
 
 # ================= Shell Utils =================
@@ -41,6 +76,7 @@ def _shell_exec(command: str) -> str:
         text=True,
         timeout=SHELL_TIMEOUT,
     )
+
     output = (proc.stdout or "") + (proc.stderr or "")
     return output[-SHELL_MAX_OUTPUT:] or "No output."
 
@@ -61,21 +97,21 @@ def shell_callback_data(
     cb_type: str,
     user_id: int,
     ts: int,
-    command: str | None = None,
+    cmd_id: str | None = None,
 ) -> str:
     parts = [
         "sh",
         cb_type,
         str(user_id),
         str(ts),
-        command or "-",
+        cmd_id or "-",
     ]
     payload = ":".join(parts)
     sig = shell_sign(payload)
     return f"{payload}:{sig}"
 
 
-# ================= Handler =================
+# ================= /shell Command =================
 
 
 @restricted
@@ -85,15 +121,14 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IndexError:
         return await update.message.reply_text("❌ No command provided.")
 
-    # && is not supported by subprocess, except in a shell context
-    # i.e. subprocess.run("cmd1 && cmd2", shell=True), which is unsafe.
     if "&&" in cmd or ";" in cmd:
-        return await update.message.reply_text(
-            "🚫 Multiple commands are not allowed. " "Please run one command at a time."
-        )
+        return await update.message.reply_text("🚫 Multiple commands are not allowed.")
 
     user_id = update.effective_user.id
     ts = int(time.time())
+    cmd_id = secrets.token_urlsafe(8)
+
+    store_command(cmd_id, cmd)
 
     preview = (
         "⚠️ <b>Confirm Shell Command</b>\n\n" f"<pre>{escape(cmd)}</pre>\n\n" "Proceed?"
@@ -104,7 +139,7 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [
                 InlineKeyboardButton(
                     "✅ Confirm",
-                    callback_data=shell_callback_data("run", user_id, ts, cmd),
+                    callback_data=shell_callback_data("run", user_id, ts, cmd_id),
                 ),
                 InlineKeyboardButton(
                     "❌ Cancel",
@@ -121,7 +156,7 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ================= Callback =================
+# ================= Callback Handler =================
 
 
 async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,37 +167,36 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(parts) != 6 or parts[0] != "sh":
         return
 
-    _, cb_type, uid, ts, command, sig = parts
+    _, cb_type, uid, ts, cmd_id, sig = parts
     uid = int(uid)
     ts = int(ts)
     now = int(time.time())
 
-    # Owner validation
+    # Owner check
     if user.id != uid:
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
-    # Expiry check
-    if now - ts > CALLBACK_TTL:
-        return await q.answer(
-            "⏱ This action has expired.",
-            show_alert=True,
-        )
-
+    # Signature check
     payload = ":".join(parts[:-1])
-    expected_sig = shell_sign(payload)
-
-    if not hmac.compare_digest(sig, expected_sig):
+    if not hmac.compare_digest(sig, shell_sign(payload)):
         return await q.answer(
             "🚨 Invalid or tampered callback.",
             show_alert=True,
         )
 
-    await q.answer()  # Acknowledge the callback to avoid "loading" state
+    await q.answer()
 
     if cb_type == "cancel":
         return await q.edit_message_text("❌ Cancelled.")
 
-    # ▶ Execute
+    status, command = pop_command(cmd_id, CALLBACK_TTL)
+
+    if status == CmdStatus.EXPIRED:
+        return await q.edit_message_text("⏱ This command has expired.")
+
+    if status == CmdStatus.NOT_FOUND:
+        return await q.edit_message_text("🚫 This action is no longer valid.")
+
     await q.edit_message_text("💻 Executing…")
 
     try:
