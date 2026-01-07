@@ -50,10 +50,10 @@ def list_docker_dirs() -> list[str]:
     )
 
 
-def is_compose_running(dir_path: Path) -> bool:
+def is_compose_status(dir_path: Path, status: str) -> bool:
     try:
         proc = subprocess.run(
-            ["docker", "compose", "ps", "-q", "--filter", "status=running"],
+            ["docker", "compose", "ps", "-q", "--filter", f"status={status}"],
             cwd=dir_path,
             capture_output=True,
             text=True,
@@ -70,23 +70,27 @@ def run_single_dc(action: str, name: str) -> str:
 
     dir_path = DOCKER_APPS_DIR / name
 
+    # Check for directory and compose file
     if not dir_path.exists():
         raise FileNotFoundError("Directory does not exist")
-
     if name in DC_IGNORE_DIRS:
         raise PermissionError(f"`{name}` is ignored permanently")
-
     if not has_compose_file(dir_path):
         raise RuntimeError("No docker compose file found")
 
-    running = is_compose_running(dir_path)
-
+    running = is_compose_status(dir_path, "running")
+    paused = is_compose_status(dir_path, "paused")
+    # Check current status to prevent redundant actions
     if action == "up" and running:
         raise RuntimeError("Containers are already running")
-
     if action == "stop" and not running:
         raise RuntimeError("Containers are already stopped")
+    if action == "pause" and paused:
+        raise RuntimeError("Containers are already paused")
+    if action == "unpause" and not paused:
+        raise RuntimeError("Containers are not paused")
 
+    # Store outputs
     outputs: list[str] = []
 
     def run_cmd(cmd: list[str]) -> None:
@@ -109,7 +113,7 @@ def run_single_dc(action: str, name: str) -> str:
     else:
         cmd = ["docker", "compose", action]
         if action == "up":
-            cmd.extend(["-d", "--no-build"])
+            cmd.extend(["-d", "--no-build"])  # detached, no build
         run_cmd(cmd)
 
     output = "".join(outputs).strip()
