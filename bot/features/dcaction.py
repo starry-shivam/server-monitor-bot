@@ -118,7 +118,7 @@ def run_bulk_dc(action: str) -> str:
         raise ValueError("Unsupported action")
 
     proc = subprocess.run(
-        ["bash", DC_SCRIPT, action],
+        ["bash", DC_SCRIPT, action, "--no-color"],
         cwd=DOCKER_APPS_DIR,
         capture_output=True,
         text=True,
