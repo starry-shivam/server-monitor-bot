@@ -5,6 +5,7 @@ import asyncio
 import requests as r
 import psutil
 from html import escape
+from zoneinfo import ZoneInfo
 
 from telegram import Update, Message
 from telegram.ext import (
@@ -13,6 +14,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
     JobQueue,
+    Defaults
 )
 
 from bot.auth import restricted
@@ -26,6 +28,7 @@ from bot.features.dcaction import dcaction, dcaction_callback
 from bot.features.powerc import powerc
 from bot.features.metrics import metrics
 from bot.features.shell import shell
+from bot.features.shell import shell_callback
 from bot.features.pyexec import pyexec
 
 
@@ -90,19 +93,34 @@ def main():
         print("Error: BOT_TOKEN not set.")
         return
 
-    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(JobQueue()).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .job_queue(JobQueue())
+        .defaults(Defaults(tzinfo=ZoneInfo("Asia/Kolkata")))
+        .build()
+    )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("fetch", fetch))
-    app.add_handler(CommandHandler("dockerps", dockerps))
-    app.add_handler(CommandHandler("dcaction", dcaction))
-    app.add_handler(CommandHandler("powerc", powerc))
-    app.add_handler(CommandHandler("metrics", metrics))
-    app.add_handler(CommandHandler("shell", shell))
-    app.add_handler(CommandHandler("pyexec", pyexec))
+    # Command handlers
+    COMMAND_HANDLERS = {
+        "start": start,
+        "help": help,
+        "ping": ping,
+        "fetch": fetch,
+        "dockerps": dockerps,
+        "dcaction": dcaction,
+        "powerc": powerc,
+        "metrics": metrics,
+        "shell": shell,
+        "pyexec": pyexec,
+    }
+
+    for command, handler in COMMAND_HANDLERS.items():
+        app.add_handler(CommandHandler(command, handler))
+
+    # Callback query handlers
     app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
+    app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
 
     app.job_queue.run_once(
         notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}
@@ -111,7 +129,7 @@ def main():
         watchdog_job, interval=60, first=30, job_kwargs={"misfire_grace_time": 5}
     )
 
-    print("🤖 Bot is running (python -m bot)…")
+    print("🤖 Bot is running…")
     app.run_polling()
 
 
