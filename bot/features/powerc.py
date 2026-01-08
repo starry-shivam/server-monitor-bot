@@ -119,7 +119,7 @@ def format_power_report():
     throttle = get_throttle()
     decoded = decode_throttle(throttle)
 
-    lines = [f"⚡ *Raspberry Pi 5 Power Report*\n"]
+    lines = ["⚡ *Raspberry Pi 5 Power Report*\n"]
     lines.append(f"🌡Temperature: `{temp:.1f}°C`")
 
     if fan_cur is not None and fan_max:

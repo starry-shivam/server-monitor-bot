@@ -1,13 +1,10 @@
-import io
-import sys
 import time
-import asyncio
 import requests as r
 import psutil
 from html import escape
 from zoneinfo import ZoneInfo
 
-from telegram import Update, Message
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -23,7 +20,7 @@ from bot.jobs import notify_boot_job, watchdog_job
 
 # Feature handlers (will exist next)
 from bot.features.fetch import fetch
-from bot.features.dockerps import dockerps
+from bot.features.dockerps import dockerps, dockerps_callback
 from bot.features.dcaction import dcaction, dcaction_callback
 from bot.features.powerc import powerc
 from bot.features.powerm import reboot, poweroff, power_callback
@@ -144,6 +141,7 @@ def main():
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
     app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
+    app.add_handler(CallbackQueryHandler(dockerps_callback, pattern=r"^dps:"))
 
     if POWER_MGMT_AVAILABLE:
         app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))

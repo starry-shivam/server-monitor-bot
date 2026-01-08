@@ -1,20 +1,34 @@
-# placeholder
+# ================= Imports =================
+
 import json
 import subprocess
 import textwrap
 import datetime
+import time
+import hmac
+import hashlib
+import base64
 from io import BytesIO
+from collections import OrderedDict
 
 import matplotlib
 
-# Set backend to Agg for headless environments (prevents GUI errors/leaks)
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from telegram import Update, InputMediaPhoto
+from telegram import (
+    Update,
+    InputMediaPhoto,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import ContextTypes
 
 from bot.auth import restricted
+from bot.config import CALLBACK_SIG_SECRET
+
+DOCKER_CALLBACK_TTL = 10 * 60  # 10 minutes
+DOCKER_REFRESH_COOLDOWN = 10  # seconds
 
 
 # ================= Docker Utils =================
@@ -252,7 +266,63 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-# ================= Handler =================
+# ================= Callback Signing =================
+
+
+def docker_sign(payload: str) -> str:
+    sig = hmac.new(
+        CALLBACK_SIG_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+
+
+def docker_callback_data(cb_type: str, user_id: int, ts: int, msg_id: int) -> str:
+    payload = f"dps:{cb_type}:{user_id}:{ts}:{msg_id}"
+    return f"{payload}:{docker_sign(payload)}"
+
+
+# ================= Rate Limit (LRU) =================
+
+_DOCKER_REFRESH_TS: OrderedDict[int, int] = OrderedDict()
+
+_DOCKER_REFRESH_MAX = 16  # max tracked messages
+_DOCKER_REFRESH_MAX_AGE = 15 * 60  # 15 minutes
+
+
+def _docker_rl_cleanup(now: int):
+    expired = [
+        mid
+        for mid, ts in _DOCKER_REFRESH_TS.items()
+        if now - ts > _DOCKER_REFRESH_MAX_AGE
+    ]
+    for mid in expired:
+        _DOCKER_REFRESH_TS.pop(mid, None)
+
+    while len(_DOCKER_REFRESH_TS) > _DOCKER_REFRESH_MAX:
+        _DOCKER_REFRESH_TS.popitem(last=False)
+
+
+def docker_keyboard(user_id: int, msg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔁 Refresh",
+                    callback_data=docker_callback_data(
+                        "refresh",
+                        user_id,
+                        int(time.time()),
+                        msg_id,
+                    ),
+                )
+            ]
+        ]
+    )
+
+
+# ================= Command Handler =================
 
 
 @restricted
@@ -265,7 +335,7 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         rows = _collect_docker_containers()
         if not rows:
-            raise RuntimeError("No containers found.")
+            raise RuntimeError("No Docker containers found.")
 
         img_bytes = _render_docker_table_image(rows)
 
@@ -273,8 +343,13 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InputMediaPhoto(
                 media=img_bytes,
                 caption="🐳 Docker Containers",
-            )
+            ),
+            reply_markup=docker_keyboard(
+                update.effective_user.id,
+                msg.message_id,
+            ),
         )
+
     except Exception as err:
         await msg.edit_media(
             InputMediaPhoto(
@@ -282,3 +357,58 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"❌ {err}",
             )
         )
+
+
+# ================= Callback Handler =================
+
+
+async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    user = q.from_user
+
+    parts = q.data.split(":")
+    if len(parts) != 6 or parts[0] != "dps":
+        return
+
+    _, cb_type, uid, ts, msg_id, sig = parts
+    uid, ts, msg_id = int(uid), int(ts), int(msg_id)
+    now = int(time.time())
+
+    # Owner check
+    if user.id != uid:
+        return await q.answer("🚫 Unauthorized", show_alert=True)
+
+    # Timeout check
+    if now - ts > DOCKER_CALLBACK_TTL:
+        return await q.answer("⏱ Button expired", show_alert=True)
+
+    # Signature check
+    payload = ":".join(parts[:-1])
+    if not hmac.compare_digest(sig, docker_sign(payload)):
+        return await q.answer("🚫 Invalid signature", show_alert=True)
+
+    _docker_rl_cleanup(now)
+
+    last = _DOCKER_REFRESH_TS.get(msg_id)
+    if last and now - last < DOCKER_REFRESH_COOLDOWN:
+        return await q.answer(
+            f"⏳ Wait {DOCKER_REFRESH_COOLDOWN - (now - last)}s",
+            show_alert=False,
+        )
+
+    _DOCKER_REFRESH_TS[msg_id] = now
+    _DOCKER_REFRESH_TS.move_to_end(msg_id)
+
+    await q.answer("🔄 Refreshing…")
+    await q.edit_message_caption("🔍 Refreshing container list...")
+
+    try:
+        rows = _collect_docker_containers()
+        img = _render_docker_table_image(rows)
+
+        await q.edit_message_media(
+            InputMediaPhoto(media=img, caption="🐳 Docker Containers"),
+            reply_markup=docker_keyboard(uid, msg_id),
+        )
+    except Exception as e:
+        await q.edit_message_caption(f"❌ {e}")

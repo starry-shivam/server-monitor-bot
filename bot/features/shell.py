@@ -170,7 +170,6 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, cb_type, uid, ts, cmd_id, sig = parts
     uid = int(uid)
     ts = int(ts)
-    now = int(time.time())
 
     # Owner check
     if user.id != uid:
