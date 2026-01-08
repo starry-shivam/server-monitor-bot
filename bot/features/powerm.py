@@ -141,7 +141,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Cancel
     if phase == "cancel":
-        task = context.user_data.pop("shutdown_task", None)
+        task = context.bot_data.pop("shutdown_task", None)
         if task:
             task.cancel()
         return await q.edit_message_text("❌ Cancelled.")
@@ -150,7 +150,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Prevent multiple countdowns
-    if context.user_data.get("shutdown_task"):
+    if context.bot_data.get("shutdown_task"):
         return await q.edit_message_text("⚠️ Shutdown already in progress.")
 
     meta = POWER_ACTIONS[action]
@@ -198,4 +198,4 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     task = asyncio.create_task(countdown())
-    context.user_data["shutdown_task"] = task
+    context.bot_data["shutdown_task"] = task
