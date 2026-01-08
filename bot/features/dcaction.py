@@ -18,6 +18,7 @@ from bot.config import (
     DOCKER_APPS_DIR,
     DC_SCRIPT,
     DC_ALLOWED_ACTIONS,
+    DC_ALL_ACTIONS,
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
     CALLBACK_SIG_SECRET,
@@ -199,6 +200,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
+    # ---- list ----
     if args[0] == "list":
         dirs = list_docker_dirs()
         if not dirs:
@@ -218,9 +220,26 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Supported actions: {', '.join(DC_ALLOWED_ACTIONS)}."
         )
 
+    # --all validation
     is_all = "--all" in args
+
+    if is_all and action not in DC_ALL_ACTIONS:
+        return await update.message.reply_text(
+            f"❌ The <code>--all</code> option is not supported for "
+            f"<code>{action}</code>.\n\n"
+            f"Allowed with: {', '.join(sorted(DC_ALL_ACTIONS))}",
+            parse_mode="HTML",
+        )
+
+    if is_all and len(args) > 2:
+        return await update.message.reply_text(
+            "❌ When using <code>--all</code>, do not specify a directory.",
+            parse_mode="HTML",
+        )
+
     target = None if is_all else (args[1] if len(args) > 1 else None)
 
+    # ---- single target validation ----
     if not is_all:
         if not target:
             return await update.message.reply_text("❌ Missing directory name.")
@@ -322,12 +341,11 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             show_alert=True,
         )
 
-    await q.answer()  # Acknowledge callback
+    await q.answer()  # acknowledge callback
 
     if cb_type == "cancel":
         return await q.edit_message_text("❌ Cancelled.")
 
-    # Execute action
     await q.edit_message_text("🐋 Executing…")
 
     try:

@@ -15,8 +15,6 @@ CALLBACK_TTL = int(os.getenv("CALLBACK_TTL", "300"))  # seconds
 CALLBACK_SIG_SECRET = str(uuid.uuid4().hex)  # Unique per bot start
 LIVE_METRICS_URL = os.getenv("LIVE_METRICS_URL", "")
 POWER_MGMT_AVAILABLE = os.getenv("POWER_MGMT_AVAILABLE", "false").lower() == "true"
-# Not a config, but useful to have here
-BOT_START_TIME = time.time()
 
 # --- Shell Config ---
 SHELL_DENYLIST = {
@@ -39,18 +37,19 @@ SHELL_TIMEOUT = int(os.getenv("SHELL_TIMEOUT", "45"))  # seconds
 SHELL_MAX_OUTPUT = int(os.getenv("SHELL_MAX_OUTPUT", "3600"))
 
 # --- Docker action config ---
-DC_ALLOWED_ACTIONS = {
-    "up",
-    "stop",
+DC_ALLOWED_ACTIONS = [
     "pull",
     "build",
-    "restart",
-    "logs",
+    "up",
+    "stop",
     "pause",
     "unpause",
-}
+    "logs",
+    "restart",
+]
+DC_ALL_ACTIONS = {"up", "stop", "pause", "unpause"}
 DOCKER_APPS_DIR = Path(os.getenv("DOCKER_APPS_DIR", "/home/starry/docker-apps"))
-# Should be located in docker apps dir
+# Should be located in docker apps dir, used to perform bulk (--all) actions
 DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
 # Comma-separated list of directory names to ignore
 DC_IGNORE_DIRS = [

@@ -15,6 +15,14 @@ RE_THROTTLE_HEX = re.compile(r"0x([0-9A-Fa-f]+)")
 # ================= Hardware Helpers =================
 
 
+def is_rpi5():
+    try:
+        model = Path("/proc/device-tree/model").read_text()
+        return "Raspberry Pi 5" in model
+    except Exception:
+        return False
+
+
 def parse_pmic():
     """Reads Raspberry Pi 5 PMIC ADC rails using vcgencmd."""
     try:
@@ -143,6 +151,12 @@ def format_minimal_power_report():
 
 @restricted
 async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if running on Raspberry Pi 5
+    if not is_rpi5():
+        return await update.message.reply_text(
+            "❌ This command is only supported on Raspberry Pi 5."
+        )
+    # Send initial message
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
     verbose = bool(context.args and "-v" in context.args)
     try:
