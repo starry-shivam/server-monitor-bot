@@ -9,7 +9,6 @@ import hmac
 import hashlib
 import base64
 from io import BytesIO
-from collections import OrderedDict
 
 import matplotlib
 
@@ -27,7 +26,7 @@ from telegram.ext import ContextTypes
 from bot.auth import restricted
 from bot.config import CALLBACK_SIG_SECRET
 
-DOCKER_CALLBACK_TTL = 10 * 60  # 10 minutes
+# Per-user cooldown for refresh
 DOCKER_REFRESH_COOLDOWN = 10  # seconds
 
 
@@ -278,30 +277,18 @@ def docker_sign(payload: str) -> str:
     return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
 
 
-def docker_callback_data(cb_type: str, user_id: int, ts: int, msg_id: int) -> str:
-    payload = f"dps:{cb_type}:{user_id}:{ts}:{msg_id}"
+def docker_callback_data(cb_type: str, user_id: int, msg_id: int) -> str:
+    payload = f"dps:{cb_type}:{user_id}:{msg_id}"
     return f"{payload}:{docker_sign(payload)}"
 
 
-# ================= Rate Limit (LRU) =================
+# ============ Simple Rate Limit =============
 
-_DOCKER_REFRESH_TS: OrderedDict[int, int] = OrderedDict()
-
-_DOCKER_REFRESH_MAX = 16  # max tracked messages
-_DOCKER_REFRESH_MAX_AGE = 15 * 60  # 15 minutes
+# message_id -> last refresh timestamp
+_DOCKER_REFRESH_TS: dict[int, int] = {}
 
 
-def _docker_rl_cleanup(now: int):
-    expired = [
-        mid
-        for mid, ts in _DOCKER_REFRESH_TS.items()
-        if now - ts > _DOCKER_REFRESH_MAX_AGE
-    ]
-    for mid in expired:
-        _DOCKER_REFRESH_TS.pop(mid, None)
-
-    while len(_DOCKER_REFRESH_TS) > _DOCKER_REFRESH_MAX:
-        _DOCKER_REFRESH_TS.popitem(last=False)
+# ================= Keyboard =================
 
 
 def docker_keyboard(user_id: int, msg_id: int) -> InlineKeyboardMarkup:
@@ -313,7 +300,6 @@ def docker_keyboard(user_id: int, msg_id: int) -> InlineKeyboardMarkup:
                     callback_data=docker_callback_data(
                         "refresh",
                         user_id,
-                        int(time.time()),
                         msg_id,
                     ),
                 )
@@ -367,37 +353,34 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = q.from_user
 
     parts = q.data.split(":")
-    if len(parts) != 6 or parts[0] != "dps":
+    if len(parts) != 5 or parts[0] != "dps":
         return
 
-    _, cb_type, uid, ts, msg_id, sig = parts
-    uid, ts, msg_id = int(uid), int(ts), int(msg_id)
-    now = int(time.time())
+    _, cb_type, uid, msg_id, sig = parts
+    uid, msg_id = int(uid), int(msg_id)
 
     # Owner check
     if user.id != uid:
         return await q.answer("🚫 Unauthorized", show_alert=True)
-
-    # Timeout check
-    if now - ts > DOCKER_CALLBACK_TTL:
-        return await q.answer("⏱ Button expired", show_alert=True)
 
     # Signature check
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, docker_sign(payload)):
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
-    _docker_rl_cleanup(now)
+    # ---- simple cooldown rate limit ----
+    now = int(time.time())
+    last = _DOCKER_REFRESH_TS.get(msg_id, 0)
+    remaining = DOCKER_REFRESH_COOLDOWN - (now - last)
 
-    last = _DOCKER_REFRESH_TS.get(msg_id)
-    if last and now - last < DOCKER_REFRESH_COOLDOWN:
+    if remaining > 0:
         return await q.answer(
-            f"⏳ Wait {DOCKER_REFRESH_COOLDOWN - (now - last)}s",
+            f"⏳ Wait {remaining}s",
             show_alert=False,
         )
 
     _DOCKER_REFRESH_TS[msg_id] = now
-    _DOCKER_REFRESH_TS.move_to_end(msg_id)
+    # -----------------------------------
 
     await q.answer("🔄 Refreshing…")
     await q.edit_message_caption("🔍 Refreshing container list...")
@@ -407,7 +390,10 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img = _render_docker_table_image(rows)
 
         await q.edit_message_media(
-            InputMediaPhoto(media=img, caption="🐳 Docker Containers"),
+            InputMediaPhoto(
+                media=img,
+                caption="🐳 Docker Containers",
+            ),
             reply_markup=docker_keyboard(uid, msg_id),
         )
     except Exception as e:

@@ -212,13 +212,14 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return await update.message.reply_text(text, parse_mode="HTML")
 
+    # ---- action validation ----
     action = args[0].lower()
     if action not in DC_ALLOWED_ACTIONS:
         return await update.message.reply_text(
             f"❌ Supported actions: {', '.join(DC_ALLOWED_ACTIONS)}."
         )
 
-    # --all validation
+    # ---- --all validation ----
     is_all = "--all" in args
 
     if is_all and action not in DC_ALL_ACTIONS:
@@ -335,7 +336,7 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not hmac.compare_digest(sig, expected_sig):
         return await q.answer(
-            "🚨 Invalid or tampered callback.",
+            "🚫 Invalid signature. Action aborted.",
             show_alert=True,
         )
 

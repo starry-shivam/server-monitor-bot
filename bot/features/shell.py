@@ -179,7 +179,7 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, shell_sign(payload)):
         return await q.answer(
-            "🚨 Invalid or tampered callback.",
+            "🚫 Invalid signature. Action aborted.",
             show_alert=True,
         )
 

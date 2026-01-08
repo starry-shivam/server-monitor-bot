@@ -18,7 +18,9 @@ def restricted(func):
     ):
         user = update.effective_user
         if not user or user.id not in OWNER_IDS:
-            msg = await update.message.reply_text("🚫 This command is owner-only.")
+            msg = await update.message.reply_text(
+                "🚫 You are not authorized to use this command."
+            )
             context.application.create_task(delete_later(msg))
             return
         return await func(update, context, *args, **kwargs)
