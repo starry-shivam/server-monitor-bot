@@ -30,7 +30,7 @@ from bot.config import (
     DOCKER_APPS_DIR,
     DC_SCRIPT,
     DC_ALLOWED_ACTIONS,
-    DC_ALL_ACTIONS,
+    DC_BULK_ACTIONS,
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
     CALLBACK_SIG_SECRET,
@@ -135,7 +135,7 @@ def run_single_dc(action: str, name: str) -> str:
 
 
 def run_bulk_dc(action: str) -> str:
-    if action not in DC_ALLOWED_ACTIONS:
+    if action not in DC_BULK_ACTIONS:
         raise ValueError("Unsupported action")
 
     cmd = ["bash", DC_SCRIPT, action, "--no-color"]
@@ -237,11 +237,11 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # validate if --all is supported for this action
     is_all = "--all" in args
 
-    if is_all and action not in DC_ALL_ACTIONS:
+    if is_all and action not in DC_BULK_ACTIONS:
         return await update.message.reply_text(
             f"❌ The <code>--all</code> option is not supported for "
             f"<code>{action}</code>.\n\n"
-            f"Allowed with: {', '.join(DC_ALL_ACTIONS)}",
+            f"Allowed with: {', '.join(DC_BULK_ACTIONS)}",
             parse_mode="HTML",
         )
 

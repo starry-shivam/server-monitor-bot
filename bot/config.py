@@ -25,7 +25,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = [int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()]
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 CALLBACK_TTL = int(os.getenv("CALLBACK_TTL", "300"))  # seconds
-CALLBACK_SIG_SECRET = str(uuid.uuid4().hex)  # Unique per bot start
+CALLBACK_SIG_SECRET = os.getenv("CALLBACK_SIG_SECRET", uuid.uuid4().hex)
 LIVE_METRICS_URL = os.getenv("LIVE_METRICS_URL", "")
 POWER_MGMT_AVAILABLE = os.getenv("POWER_MGMT_AVAILABLE", "false").lower() == "true"
 
@@ -60,7 +60,8 @@ DC_ALLOWED_ACTIONS = [
     "logs",
     "restart",
 ]
-DC_ALL_ACTIONS = ["up", "stop", "pause", "unpause"]
+# Actions that support --all flag
+DC_BULK_ACTIONS = ["up", "stop", "pause", "unpause"]
 DOCKER_APPS_DIR = Path(os.getenv("DOCKER_APPS_DIR", "/home/starry/docker-apps"))
 # Should be located in docker apps dir, used to perform bulk (--all) actions
 DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
