@@ -227,7 +227,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             f"❌ The <code>--all</code> option is not supported for "
             f"<code>{action}</code>.\n\n"
-            f"Allowed with: {', '.join(sorted(DC_ALL_ACTIONS))}",
+            f"Allowed with: {', '.join(DC_ALL_ACTIONS)}",
             parse_mode="HTML",
         )
 
