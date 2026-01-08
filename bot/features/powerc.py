@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import re
 import subprocess
 from pathlib import Path
@@ -24,7 +38,9 @@ def is_rpi5():
 
 
 def parse_pmic():
-    """Reads Raspberry Pi 5 PMIC ADC rails using vcgencmd."""
+    """
+    Reads Raspberry Pi 5 PMIC ADC rails using vcgencmd.
+    """
     try:
         out = subprocess.check_output(["vcgencmd", "pmic_read_adc"], text=True)
     except subprocess.CalledProcessError:
@@ -77,6 +93,9 @@ def get_throttle():
 
 
 def decode_throttle(hex_str: str) -> str:
+    """
+    Decodes the throttling status from the hex string returned by vcgencmd get_throttled.
+    """
     m = RE_THROTTLE_HEX.search(hex_str)
     if not m:
         return "Unknown"
@@ -158,7 +177,7 @@ async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     # Send initial message
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
-    verbose = bool(context.args and "-v" in context.args)
+    verbose = bool(context.args and "--verbose" in context.args)
     try:
         report = format_power_report() if verbose else format_minimal_power_report()
         await msg.edit_text(report, parse_mode="Markdown")

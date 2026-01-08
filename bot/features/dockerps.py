@@ -1,4 +1,16 @@
-# ================= Imports =================
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 import json
 import subprocess
@@ -29,6 +41,9 @@ from bot.config import CALLBACK_SIG_SECRET
 # Per-user cooldown for refresh
 DOCKER_REFRESH_COOLDOWN = 10  # seconds
 
+# Used for rate limiting refreshes
+# message_id -> last refresh timestamp
+_DOCKER_REFRESH_TS: dict[int, int] = {}
 
 # ================= Docker Utils =================
 
@@ -282,12 +297,6 @@ def docker_callback_data(cb_type: str, user_id: int, msg_id: int) -> str:
     return f"{payload}:{docker_sign(payload)}"
 
 
-# ============ Simple Rate Limit =============
-
-# message_id -> last refresh timestamp
-_DOCKER_REFRESH_TS: dict[int, int] = {}
-
-
 # ================= Keyboard =================
 
 
@@ -354,7 +363,7 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = q.data.split(":")
     if len(parts) != 5 or parts[0] != "dps":
-        return
+        return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb_type, uid, msg_id, sig = parts
     uid, msg_id = int(uid), int(msg_id)
@@ -368,7 +377,7 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not hmac.compare_digest(sig, docker_sign(payload)):
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
-    # ---- simple cooldown rate limit ----
+    # Enforce rate limit
     now = int(time.time())
     last = _DOCKER_REFRESH_TS.get(msg_id, 0)
     remaining = DOCKER_REFRESH_COOLDOWN - (now - last)
@@ -380,7 +389,6 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     _DOCKER_REFRESH_TS[msg_id] = now
-    # -----------------------------------
 
     await q.answer("🔄 Refreshing…")
     await q.edit_message_caption("🔍 Refreshing container list...")

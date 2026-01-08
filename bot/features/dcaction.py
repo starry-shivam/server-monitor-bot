@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import time
 import hmac
 import hashlib
@@ -79,6 +93,7 @@ def run_single_dc(action: str, name: str) -> str:
 
     running = is_compose_status(dir_path, "running")
     paused = is_compose_status(dir_path, "paused")
+
     # Check current status to prevent redundant actions
     if action == "up" and running:
         raise RuntimeError("Containers are already running")
@@ -181,7 +196,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not args:
         return await update.message.reply_text(
-            "❌ <b>Usage:</b>\n"
+            "🐋 <b>Usage:</b>\n"
             "‣ <code>/dcaction list</code>\n"
             "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
             "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
@@ -198,7 +213,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-    # ---- list ----
+    # Handle list action first because it is not a real action
     if args[0] == "list":
         dirs = list_docker_dirs()
         if not dirs:
@@ -212,14 +227,14 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return await update.message.reply_text(text, parse_mode="HTML")
 
-    # ---- action validation ----
+    # validate action
     action = args[0].lower()
     if action not in DC_ALLOWED_ACTIONS:
         return await update.message.reply_text(
             f"❌ Supported actions: {', '.join(DC_ALLOWED_ACTIONS)}."
         )
 
-    # ---- --all validation ----
+    # validate if --all is supported for this action
     is_all = "--all" in args
 
     if is_all and action not in DC_ALL_ACTIONS:
@@ -230,6 +245,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
+    # show error if both --all and directory specified
     if is_all and len(args) > 2:
         return await update.message.reply_text(
             "❌ When using <code>--all</code>, do not specify a directory.",
@@ -238,7 +254,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target = None if is_all else (args[1] if len(args) > 1 else None)
 
-    # ---- single target validation ----
+    # single target validation
     if not is_all:
         if not target:
             return await update.message.reply_text("❌ Missing directory name.")
@@ -311,7 +327,7 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = q.data.split(":")
     if len(parts) != 7 or parts[0] != "dc":
-        return
+        return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb_type, uid, ts, action, target, sig = parts
 

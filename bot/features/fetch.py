@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import subprocess
 
 from telegram import Update
@@ -57,6 +71,6 @@ def run_fastfetch(include_ip: bool = False) -> str:
 @restricted
 async def fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🛰 Gathering system info…")
-    include_ip = bool(context.args and "-ip" in context.args)
+    include_ip = bool(context.args and "--ip" in context.args)
     text = run_fastfetch(include_ip=include_ip)
     await msg.edit_text(f"```\n{text}\n```", parse_mode="Markdown")

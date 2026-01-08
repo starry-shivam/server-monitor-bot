@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import shlex
 import subprocess
 import time
@@ -165,7 +179,7 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = q.data.split(":")
     if len(parts) != 6 or parts[0] != "sh":
-        return
+        return await q.answer("🚫 Invalid callback.", show_alert=True)
 
     _, cb_type, uid, ts, cmd_id, sig = parts
     uid = int(uid)
