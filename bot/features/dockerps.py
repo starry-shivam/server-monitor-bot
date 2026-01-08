@@ -21,6 +21,7 @@ import hmac
 import hashlib
 import base64
 from io import BytesIO
+from collections import OrderedDict
 
 import matplotlib
 
@@ -43,8 +44,8 @@ DOCKER_REFRESH_COOLDOWN = 10  # seconds
 
 # Used for rate limiting refreshes
 # message_id -> last refresh timestamp
-_DOCKER_REFRESH_TS: dict[int, int] = {}
-
+_DOCKER_REFRESH_TS = OrderedDict()
+_MAX_CACHE_SIZE = 15
 # ================= Docker Utils =================
 
 
@@ -388,7 +389,13 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             show_alert=False,
         )
 
+    # Update LRU timestamp
     _DOCKER_REFRESH_TS[msg_id] = now
+    _DOCKER_REFRESH_TS.move_to_end(msg_id)
+
+    # Evict oldest entry if cache grows too large
+    if len(_DOCKER_REFRESH_TS) > _MAX_CACHE_SIZE:
+        _DOCKER_REFRESH_TS.popitem(last=False)
 
     await q.answer("🔄 Refreshing…")
     await q.edit_message_caption("🔍 Refreshing container list...")
