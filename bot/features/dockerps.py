@@ -18,8 +18,6 @@ import textwrap
 import datetime
 import time
 import hmac
-import hashlib
-import base64
 from io import BytesIO
 from collections import OrderedDict
 
@@ -36,8 +34,8 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from bot.features import cb_sign
 from bot.auth import restricted
-from bot.config import CALLBACK_SIG_SECRET
 
 # Per-user cooldown for refresh
 DOCKER_REFRESH_COOLDOWN = 10  # seconds
@@ -281,24 +279,12 @@ def _render_docker_table_image(rows: list[dict]) -> bytes:
     return buf.getvalue()
 
 
-# ================= Callback Signing =================
-
-
-def docker_sign(payload: str) -> str:
-    sig = hmac.new(
-        CALLBACK_SIG_SECRET.encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+# ================= Keyboard =================
 
 
 def docker_callback_data(cb_type: str, user_id: int, msg_id: int) -> str:
     payload = f"dps:{cb_type}:{user_id}:{msg_id}"
-    return f"{payload}:{docker_sign(payload)}"
-
-
-# ================= Keyboard =================
+    return f"{payload}:{cb_sign(payload)}"
 
 
 def docker_keyboard(user_id: int, msg_id: int) -> InlineKeyboardMarkup:
@@ -375,7 +361,7 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Signature check
     payload = ":".join(parts[:-1])
-    if not hmac.compare_digest(sig, docker_sign(payload)):
+    if not hmac.compare_digest(sig, cb_sign(payload)):
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
     # Enforce rate limit

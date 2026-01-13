@@ -16,8 +16,6 @@ import shlex
 import subprocess
 import time
 import hmac
-import hashlib
-import base64
 import secrets
 from enum import Enum
 from html import escape
@@ -29,11 +27,11 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from bot.features import cb_sign
 from bot.config import (
     SHELL_DENYLIST,
     SHELL_TIMEOUT,
     SHELL_MAX_OUTPUT,
-    CALLBACK_SIG_SECRET,
     CALLBACK_TTL,
 )
 from bot.auth import restricted
@@ -95,16 +93,7 @@ def _shell_exec(command: str) -> str:
     return output[-SHELL_MAX_OUTPUT:] or "No output."
 
 
-# ================= Callback Signing =================
-
-
-def shell_sign(payload: str) -> str:
-    sig = hmac.new(
-        CALLBACK_SIG_SECRET.encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+# ================= Callback Data =================
 
 
 def shell_callback_data(
@@ -121,7 +110,7 @@ def shell_callback_data(
         cmd_id or "-",
     ]
     payload = ":".join(parts)
-    sig = shell_sign(payload)
+    sig = cb_sign(payload)
     return f"{payload}:{sig}"
 
 
@@ -191,7 +180,7 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Signature check
     payload = ":".join(parts[:-1])
-    if not hmac.compare_digest(sig, shell_sign(payload)):
+    if not hmac.compare_digest(sig, cb_sign(payload)):
         return await q.answer(
             "🚫 Invalid signature. Action aborted.",
             show_alert=True,

@@ -14,8 +14,6 @@
 
 import time
 import hmac
-import hashlib
-import base64
 import subprocess
 import asyncio
 import logging
@@ -27,8 +25,9 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from bot.features import cb_sign
 from bot.auth import restricted
-from bot.config import CALLBACK_SIG_SECRET, CALLBACK_TTL
+from bot.config import CALLBACK_TTL
 
 
 log = logging.getLogger(__name__)
@@ -61,26 +60,15 @@ POWER_ACTIONS = {
 }
 
 
-# ================= Callback Signing =================
-
-
-def _sign(payload: str) -> str:
-    sig = hmac.new(
-        CALLBACK_SIG_SECRET.encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+# ================= Callback Data =================
 
 
 def _cb(action: str, user_id: int, ts: int, phase: str) -> str:
     payload = f"pw:{phase}:{action}:{user_id}:{ts}"
-    return f"{payload}:{_sign(payload)}"
+    return f"{payload}:{cb_sign(payload)}"
 
 
-# ================= Commands =================
-
-
+# ================= Commands ====+================
 @restricted
 async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _prompt(update, context, "reboot")
@@ -148,7 +136,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Signature check
     payload = ":".join(parts[:-1])
-    if not hmac.compare_digest(sig, _sign(payload)):
+    if not hmac.compare_digest(sig, cb_sign(payload)):
         return await q.answer("🚫 Invalid signature.", show_alert=True)
 
     await q.answer()  # Acknowledge callback to remove loading state

@@ -13,4 +13,21 @@
 # SOFTWARE.
 #
 #
-# This file is intentionally left blank to mark the directory as a package.
+
+import hmac
+import hashlib
+import base64
+from bot.config import CALLBACK_SIG_SECRET
+
+
+def cb_sign(payload: str) -> str:
+    """
+    Generate HMAC-SHA256 signature for a given payload.
+    Used for securing callback data.
+    """
+    sig = hmac.new(
+        CALLBACK_SIG_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")

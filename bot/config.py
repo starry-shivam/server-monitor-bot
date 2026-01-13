@@ -26,7 +26,6 @@ OWNER_IDS = [int(x) for x in os.getenv("OWNER_IDS", "0").split(",") if x.strip()
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 CALLBACK_TTL = int(os.getenv("CALLBACK_TTL", "300"))  # seconds
 CALLBACK_SIG_SECRET = os.getenv("CALLBACK_SIG_SECRET", uuid.uuid4().hex)
-LIVE_METRICS_URL = os.getenv("LIVE_METRICS_URL", "")
 POWER_MGMT_AVAILABLE = os.getenv("POWER_MGMT_AVAILABLE", "false").lower() == "true"
 
 # --- Shell Config ---

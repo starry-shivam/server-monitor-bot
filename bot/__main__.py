@@ -33,14 +33,13 @@ from bot.config import BOT_TOKEN, POWER_MGMT_AVAILABLE
 from bot.jobs import notify_boot_job, watchdog_job
 
 # Feature imports
-from bot.features.fetch import fetch
+from bot.features.fetch import fetch, fetch_callback
 from bot.features.dockerps import dockerps, dockerps_callback
 from bot.features.dcaction import dcaction, dcaction_callback
-from bot.features.powerc import powerc
+from bot.features.powerc import powerc, powerc_callback
 from bot.features.powerm import reboot, poweroff, power_callback
-from bot.features.metrics import metrics
-from bot.features.shell import shell
-from bot.features.shell import shell_callback
+from bot.features.metrics import metrics, metrics_callback
+from bot.features.shell import shell, shell_callback
 from bot.features.pyexec import pyexec
 
 
@@ -153,12 +152,24 @@ def main():
         app.add_handler(CommandHandler(command, handler))
 
     # Callback query handlers
-    app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))
-    app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
-    app.add_handler(CallbackQueryHandler(dockerps_callback, pattern=r"^dps:"))
+    CALLBACK_HANDLERS = {
+        r"^ffc:": fetch_callback,
+        r"^dps:": dockerps_callback,
+        r"^dc:": dcaction_callback,
+        r"^pwc:": powerc_callback,
+        r"^mtr:": metrics_callback,
+        r"^sh:": shell_callback,
+    }
 
     if POWER_MGMT_AVAILABLE:
-        app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))
+        CALLBACK_HANDLERS.update(
+            {
+                r"^pw:": power_callback,
+            }
+        )
+
+    for pattern, handler in CALLBACK_HANDLERS.items():
+        app.add_handler(CallbackQueryHandler(handler, pattern=pattern))
 
     app.job_queue.run_once(
         notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}

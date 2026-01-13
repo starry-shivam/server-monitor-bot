@@ -14,8 +14,6 @@
 
 import time
 import hmac
-import hashlib
-import base64
 import subprocess
 from pathlib import Path
 
@@ -26,6 +24,7 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from bot.features import cb_sign
 from bot.config import (
     DOCKER_APPS_DIR,
     DC_SCRIPT,
@@ -33,7 +32,6 @@ from bot.config import (
     DC_BULK_ACTIONS,
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
-    CALLBACK_SIG_SECRET,
 )
 from bot.auth import restricted
 
@@ -155,16 +153,7 @@ def run_bulk_dc(action: str) -> str:
     return output.strip() or "No output."
 
 
-# ================= Callback Signing =================
-
-
-def dc_sign(payload: str) -> str:
-    sig = hmac.new(
-        CALLBACK_SIG_SECRET.encode(),
-        payload.encode(),
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(sig[:9]).decode().rstrip("=")
+# ============== Callback Data ================
 
 
 def dc_callback_data(
@@ -183,7 +172,7 @@ def dc_callback_data(
         target or "-",
     ]
     payload = ":".join(parts)
-    sig = dc_sign(payload)
+    sig = cb_sign(payload)
     return f"{payload}:{sig}"
 
 
@@ -348,7 +337,7 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Signature check
     payload = ":".join(parts[:-1])
-    expected_sig = dc_sign(payload)
+    expected_sig = cb_sign(payload)
 
     if not hmac.compare_digest(sig, expected_sig):
         return await q.answer(

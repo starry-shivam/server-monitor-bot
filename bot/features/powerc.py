@@ -15,15 +15,25 @@
 import re
 import subprocess
 from pathlib import Path
+import time
+import hmac
+from collections import OrderedDict
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from bot.auth import restricted
+from bot.features import cb_sign
 
 # --- Pre-compiled Regex ---
 RE_PMIC_CURRENT = re.compile(r"(\S+)_A.*?=([\d.]+)A")
 RE_PMIC_VOLTAGE = re.compile(r"(\S+)_V.*?=([\d.]+)V")
 RE_THROTTLE_HEX = re.compile(r"0x([0-9A-Fa-f]+)")
+
+# ================= Refresh Control =================
+
+POWERC_REFRESH_COOLDOWN = 5  # seconds
+_POWERC_REFRESH_TS = OrderedDict()
+_POWERC_MAX_CACHE_SIZE = 15
 
 
 # ================= Hardware Helpers =================
@@ -165,6 +175,29 @@ def format_minimal_power_report():
     return f"Power: `{total:.3f} W` | CPU Temp: `{temp:.1f}°C` | Fan: `{pct:.0f}%`"
 
 
+# ================= Callback Data =================
+
+
+def powerc_callback_data(cb_type: str, user_id: int, msg_id: int, verbose: int) -> str:
+    payload = f"pwc:{cb_type}:{user_id}:{msg_id}:{verbose}"
+    return f"{payload}:{cb_sign(payload)}"
+
+
+def powerc_keyboard(user_id: int, msg_id: int, verbose: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔁 Refresh",
+                    callback_data=powerc_callback_data(
+                        "refresh", user_id, msg_id, int(verbose)
+                    ),
+                )
+            ]
+        ]
+    )
+
+
 # ================= Handler =================
 
 
@@ -175,11 +208,71 @@ async def powerc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "❌ This command is only supported on Raspberry Pi 5."
         )
+
+    verbose = bool(context.args and "--verbose" in context.args)
+
     # Send initial message
     msg = await update.message.reply_text("📡 Reading PMIC ADC…")
-    verbose = bool(context.args and "--verbose" in context.args)
     try:
         report = format_power_report() if verbose else format_minimal_power_report()
-        await msg.edit_text(report, parse_mode="Markdown")
+        await msg.edit_text(
+            report,
+            parse_mode="Markdown",
+            reply_markup=powerc_keyboard(
+                update.effective_user.id,
+                msg.message_id,
+                verbose,
+            ),
+        )
     except Exception as e:
         await msg.edit_text(f"❌ Error: `{e}`", parse_mode="Markdown")
+
+
+# ================= Callback Handler =================
+
+
+async def powerc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    parts = q.data.split(":")
+
+    if len(parts) != 6 or parts[0] != "pwc":
+        return await q.answer("🚫 Invalid callback", show_alert=True)
+
+    _, cb, uid, msg_id, verbose, sig = parts
+    uid = int(uid)
+    msg_id = int(msg_id)
+    verbose = bool(int(verbose))
+
+    if q.from_user.id != uid:
+        return await q.answer("🚫 Unauthorized", show_alert=True)
+
+    payload = ":".join(parts[:-1])
+    if not hmac.compare_digest(sig, cb_sign(payload)):
+        return await q.answer("🚫 Invalid signature", show_alert=True)
+
+    if not is_rpi5():
+        return await q.answer("❌ Only supported on Raspberry Pi 5.", show_alert=True)
+
+    now = int(time.time())
+    last = _POWERC_REFRESH_TS.get(msg_id, 0)
+    wait = POWERC_REFRESH_COOLDOWN - (now - last)
+    if wait > 0:
+        return await q.answer(f"⏳ Wait {wait}s")
+
+    _POWERC_REFRESH_TS[msg_id] = now
+    _POWERC_REFRESH_TS.move_to_end(msg_id)
+    if len(_POWERC_REFRESH_TS) > _POWERC_MAX_CACHE_SIZE:
+        _POWERC_REFRESH_TS.popitem(last=False)
+
+    await q.answer("🔄 Refreshing…")
+    await q.edit_message_text("📡 Reading PMIC ADC…")
+
+    try:
+        report = format_power_report() if verbose else format_minimal_power_report()
+        await q.edit_message_text(
+            report,
+            parse_mode="Markdown",
+            reply_markup=powerc_keyboard(uid, msg_id, verbose),
+        )
+    except Exception as e:
+        await q.edit_message_text(f"❌ Error: `{e}`", parse_mode="Markdown")
