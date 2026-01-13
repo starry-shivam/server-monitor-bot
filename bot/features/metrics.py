@@ -33,6 +33,7 @@ from telegram.ext import ContextTypes
 
 from bot.features import cb_sign
 from bot.auth import restricted
+from bot.config import ADDITIONAL_DRIVE_PATHS
 
 # ================= Refresh Control =================
 
@@ -55,13 +56,31 @@ def _gb(bytes_amount: int) -> float:
     return bytes_amount / (1024**3)
 
 
+
+
 def _collect_metrics():
+    disk_paths = ["/"] + ADDITIONAL_DRIVE_PATHS.copy()
     cpu_pct = psutil.cpu_percent(interval=None)
     freq = psutil.cpu_freq()
     cpu_freq_ghz = (freq.current / 1000) if freq else 0.0
-
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
+
+    # Collect metrics for all requested disk paths
+    disks_data = []
+    for path in disk_paths:
+        try:
+            usage = psutil.disk_usage(path)
+            disks_data.append(
+                {
+                    "path": path,
+                    "pct": usage.percent,
+                    "used_gb": _gb(usage.used),
+                    "total_gb": _gb(usage.total),
+                }
+            )
+        except Exception:
+            # Handle cases where a config path might not exist or be unmounted
+            continue
 
     return dict(
         cpu_pct=cpu_pct,
@@ -69,9 +88,7 @@ def _collect_metrics():
         mem_pct=mem.percent,
         mem_used_gb=_gb(mem.used),
         mem_total_gb=_gb(mem.total),
-        disk_pct=disk.percent,
-        disk_used_gb=_gb(disk.used),
-        disk_total_gb=_gb(disk.total),
+        disks=disks_data,  # New structure: list of dicts
     )
 
 
@@ -84,24 +101,35 @@ async def _metrics_render_chart(
     mem_pct: float,
     mem_used_gb: float,
     mem_total_gb: float,
-    disk_pct: float,
-    disk_used_gb: float,
-    disk_total_gb: float,
+    disks: list[dict],  # Changed from flat args to a list of dicts
 ) -> bytes:
     plt.style.use("seaborn-v0_8-white")
 
-    # Increase figure height slightly to give elements room to breathe
-    fig = plt.figure(figsize=(8, 5.5))
+    num_disks = len(disks)
 
-    # Use GridSpec to control the gap between the Rings (top) and Bar (bottom)
-    # hspace=0.4 pushes the bottom bar down so it doesn't crowd the top
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.2, 0.4], hspace=0.4)
+    # --- Dynamic Layout Calculation ---
+    # Base height for the top rings (CPU/Mem)
+    top_section_height = 3.5
+    # Height per disk bar (gives enough room for label + bar + gap)
+    height_per_disk = 1.2
+
+    bottom_section_height = max(1.5, num_disks * height_per_disk)
+    total_fig_height = top_section_height + bottom_section_height
+
+    # Calculate height ratios for GridSpec
+    # This ensures the top rings stay circular and the bottom area expands
+    ratios = [top_section_height, bottom_section_height]
+
+    fig = plt.figure(figsize=(8, total_fig_height))
+
+    # Adjust hspace to separate rings from the first disk bar
+    gs = fig.add_gridspec(2, 2, height_ratios=ratios, hspace=0.3)
 
     ax_cpu = fig.add_subplot(gs[0, 0])
     ax_mem = fig.add_subplot(gs[0, 1])
     ax_disk = fig.add_subplot(gs[1, :])
 
-    # Move Main Title higher up so it doesn't touch the charts
+    # Title adjustment
     fig.suptitle(
         "System Resource Usage", fontsize=16, fontweight="bold", y=0.96, color="#222"
     )
@@ -112,7 +140,7 @@ async def _metrics_render_chart(
     text_color = "#333333"
     sub_text_color = "#757575"
 
-    # ================= CPU =================
+    # ================= CPU (Unchanged) =================
     ax_cpu.pie(
         [cpu_pct, 100 - cpu_pct],
         colors=[_usage_color(cpu_pct), empty_color],
@@ -120,8 +148,6 @@ async def _metrics_render_chart(
         counterclock=False,
         wedgeprops=donut_props,
     )
-    # Manual Text Placement
-    # Percentage (Center)
     ax_cpu.text(
         0,
         0.15,
@@ -132,8 +158,6 @@ async def _metrics_render_chart(
         fontweight="bold",
         color=text_color,
     )
-
-    # etail (Slightly lower to create a gap)
     ax_cpu.text(
         0,
         -0.25,
@@ -144,8 +168,6 @@ async def _metrics_render_chart(
         color=sub_text_color,
         fontweight="medium",
     )
-
-    # Label (Below the donut)
     ax_cpu.text(
         0,
         -1.25,
@@ -157,7 +179,7 @@ async def _metrics_render_chart(
         color=text_color,
     )
 
-    # ================= MEMORY =================
+    # ================= MEMORY (Unchanged) =================
     ax_mem.pie(
         [mem_pct, 100 - mem_pct],
         colors=[_usage_color(mem_pct), empty_color],
@@ -165,8 +187,6 @@ async def _metrics_render_chart(
         counterclock=False,
         wedgeprops=donut_props,
     )
-
-    # Percentage
     ax_mem.text(
         0,
         0.15,
@@ -177,8 +197,6 @@ async def _metrics_render_chart(
         fontweight="bold",
         color=text_color,
     )
-
-    # Detail
     ax_mem.text(
         0,
         -0.25,
@@ -189,8 +207,6 @@ async def _metrics_render_chart(
         color=sub_text_color,
         fontweight="medium",
     )
-
-    # Label
     ax_mem.text(
         0,
         -1.25,
@@ -202,51 +218,70 @@ async def _metrics_render_chart(
         color=text_color,
     )
 
-    # ================= DISK =================
+    # ================= DISKS (Dynamic Loop) =================
     ax_disk.set_axis_off()
     ax_disk.set_xlim(0, 100)
-    ax_disk.set_ylim(0, 1)
 
-    # Helper vars for layout inside the disk axis
-    bar_y = 0.35  # Vertical position of the bar
-    bar_h = 0.3  # Thickness of the bar
-    text_y = 0.85  # Text sits just above the bar
+    # Set Y-axis to accommodate N disks.
+    # We invert axis so index 0 is at the top.
+    ax_disk.set_ylim(0, num_disks)
+    ax_disk.invert_yaxis()
 
-    # Labels
-    ax_disk.text(
-        0,
-        text_y,
-        "Disk Storage",
-        fontsize=12,
-        fontweight="bold",
-        color=text_color,
-        va="bottom",
-    )
-    ax_disk.text(
-        100,
-        text_y,
-        f"{disk_used_gb:.1f} / {disk_total_gb:.1f} GB ({disk_pct:.1f}%)",
-        ha="right",
-        fontsize=11,
-        color=sub_text_color,
-        va="bottom",
-    )
+    # Bar Layout Constants
+    bar_height = 0.4
 
-    # Background Track
-    ax_disk.barh(bar_y, 100, height=bar_h, color=empty_color, align="center", left=0)
+    for i, disk in enumerate(disks):
+        pct = disk["pct"]
+        path_name = disk["path"]
+        used = disk["used_gb"]
+        total = disk["total_gb"]
 
-    # Usage Bar
-    ax_disk.barh(
-        bar_y,
-        disk_pct,
-        height=bar_h,
-        color=_usage_color(disk_pct),
-        align="center",
-        left=0,
-    )
+        # Determine vertical center for this row (0, 1, 2...)
+        y_center = i + 0.5
+
+        # Offsets relative to y_center
+        text_y_pos = y_center - 0.25  # Text above bar
+        bar_y_pos = y_center + 0.1  # Bar below text
+
+        # 1. Path Label (Left)
+        ax_disk.text(
+            0,
+            text_y_pos,
+            f"Drive {i}: {path_name}",
+            fontsize=12,
+            fontweight="bold",
+            color=text_color,
+            va="center",
+        )
+
+        # 2. Stats Label (Right)
+        ax_disk.text(
+            100,
+            text_y_pos,
+            f"{used:.1f} / {total:.1f} GB ({pct:.1f}%)",
+            ha="right",
+            fontsize=11,
+            color=sub_text_color,
+            va="center",
+        )
+
+        # 3. Background Track
+        ax_disk.barh(
+            bar_y_pos, 100, height=bar_height, color=empty_color, align="center", left=0
+        )
+
+        # 4. Usage Bar
+        ax_disk.barh(
+            bar_y_pos,
+            pct,
+            height=bar_height,
+            color=_usage_color(pct),
+            align="center",
+            left=0,
+        )
 
     # Final margins
-    plt.subplots_adjust(left=0.05, right=0.95, top=0.88, bottom=0.05)
+    plt.subplots_adjust(left=0.05, right=0.95, top=0.90, bottom=0.05)
 
     buf = BytesIO()
     plt.savefig(buf, format="png", dpi=120, bbox_inches="tight", pad_inches=0.2)
