@@ -56,8 +56,6 @@ def _gb(bytes_amount: int) -> float:
     return bytes_amount / (1024**3)
 
 
-
-
 def _collect_metrics():
     disk_paths = ["/"] + ADDITIONAL_DRIVE_PATHS.copy()
     cpu_pct = psutil.cpu_percent(interval=None)

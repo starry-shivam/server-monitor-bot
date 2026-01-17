@@ -79,7 +79,9 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "    ├ <code>/dcaction pause --all</code>",
         "    ├ <code>/dcaction unpause &lt;dir&gt;</code>",
         "    ├ <code>/dcaction unpause --all</code>",
+        "    ├ <code>/dcaction update &lt;dir&gt;</code>",
         "    ├ <code>/dcaction logs &lt;dir&gt;</code>",
+        "    ├ <code>/dcaction down &lt;dir&gt;</code>",
         "    └ <code>/dcaction restart &lt;dir&gt;</code>",
     ]
 

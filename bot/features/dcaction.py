@@ -80,8 +80,7 @@ def run_single_dc(action: str, name: str) -> str:
         raise ValueError("Unsupported action")
 
     dir_path = DOCKER_APPS_DIR / name
-
-    # Check for directory and compose file
+    # Validation Checks
     if not dir_path.exists():
         raise FileNotFoundError("Directory does not exist")
     if name in DC_IGNORE_DIRS:
@@ -89,25 +88,23 @@ def run_single_dc(action: str, name: str) -> str:
     if not has_compose_file(dir_path):
         raise RuntimeError("No docker compose file found")
 
-    running = is_compose_status(dir_path, "running")
-    paused = is_compose_status(dir_path, "paused")
-
-    # Check current status to prevent redundant actions
-    if action == "up" and running:
+    # Only run status checks for actions that require it
+    if action == "up" and is_compose_status(dir_path, "running"):
         raise RuntimeError("Containers are already running")
-    if action == "stop" and not running:
+    elif action == "stop" and not is_compose_status(dir_path, "running"):
         raise RuntimeError("Containers are already stopped")
-    if action == "pause" and paused:
+    elif action == "pause" and is_compose_status(dir_path, "paused"):
         raise RuntimeError("Containers are already paused")
-    if action == "unpause" and not paused:
+    elif action == "unpause" and not is_compose_status(dir_path, "paused"):
         raise RuntimeError("Containers are not paused")
 
-    # Store outputs
     outputs: list[str] = []
 
-    def run_cmd(cmd: list[str]) -> None:
+    # Internal helper to run docker compose commands
+    def _run_cmd(args: list[str]) -> None:
+        """Internal helper to run docker compose commands."""
         proc = subprocess.run(
-            cmd,
+            ["docker", "compose"] + args,
             cwd=dir_path,
             capture_output=True,
             text=True,
@@ -116,17 +113,33 @@ def run_single_dc(action: str, name: str) -> str:
         )
         outputs.append((proc.stdout or "") + (proc.stderr or ""))
 
-    if action == "restart":  # handle restart as down + up
-        run_cmd(["docker", "compose", "down"])
-        run_cmd(["docker", "compose", "up", "-d", "--no-build"])
-    elif action == "logs":  # limited to last 100 lines
-        cmd = ["docker", "compose", "logs", "--tail", "100"]
-        run_cmd(cmd)
+    # Prepare commands based on action
+    commands_to_run = []
+
+    if action == "restart":
+        commands_to_run = [["down"], ["up", "-d", "--no-build"]]
+
+    elif action == "update":
+        # Check if local build files exist
+        build_locally = any(
+            (dir_path / f).exists() for f in ["Dockerfile", "docker-compose.build.yml"]
+        )
+        first_step = ["build"] if build_locally else ["pull"]
+        commands_to_run = [first_step, ["down"], ["up", "-d", "--no-build"]]
+
+    elif action == "logs":
+        commands_to_run = [["logs", "--tail", "100"]]
+
     else:
-        cmd = ["docker", "compose", action]
+        # Standard single-step actions (up, stop, pause, unpause, down)
+        args = [action]
         if action == "up":
-            cmd.extend(["-d", "--no-build"])  # detached, no build
-        run_cmd(cmd)
+            args.extend(["-d", "--no-build"])
+        commands_to_run = [args]
+
+    # Execute all queued commands
+    for args in commands_to_run:
+        _run_cmd(args)
 
     output = "".join(outputs).strip()
     return output or "No output."
@@ -176,33 +189,84 @@ def dc_callback_data(
     return f"{payload}:{sig}"
 
 
+def dc_keyboard(
+    user_id: int, ts: int, action: str, target: str = None
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Confirm",
+                    callback_data=dc_callback_data(
+                        "run",
+                        user_id,
+                        ts,
+                        action,
+                        target or "ALL",
+                    ),
+                ),
+                InlineKeyboardButton(
+                    "❌ Cancel",
+                    callback_data=dc_callback_data(
+                        "cancel",
+                        user_id,
+                        ts,
+                    ),
+                ),
+            ]
+        ]
+    )
+
+
 # ================= Handlers =================
+
+
+def dcaction_help() -> str:
+    return (
+        "🐋 <b>Docker Compose Action Command</b>\n\n"
+        "Use <code>/dcaction</code> to manage your Docker Compose applications.\n\n"
+        "<b>Usage:</b>\n"
+        "‣ <code>/dcaction list</code>\n"
+        "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction up --all</code>\n"
+        "‣ <code>/dcaction stop &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction stop --all</code>\n"
+        "‣ <code>/dcaction pause &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction pause --all</code>\n"
+        "‣ <code>/dcaction unpause &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction unpause --all</code>\n"
+        "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction restart &lt;dir&gt;</code>"
+    )
 
 
 @restricted
 async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
 
+    if not DOCKER_APPS_DIR.exists():
+        return await update.message.reply_text(
+            "❌ Docker apps directory is not configured."
+        )
+
     if not args:
         return await update.message.reply_text(
-            "🐋 <b>Usage:</b>\n"
-            "‣ <code>/dcaction list</code>\n"
-            "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction up --all</code>\n"
-            "‣ <code>/dcaction stop &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction stop --all</code>\n"
-            "‣ <code>/dcaction pause &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction pause --all</code>\n"
-            "‣ <code>/dcaction unpause &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction unpause --all</code>\n"
-            "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
-            "‣ <code>/dcaction restart &lt;dir&gt;</code>",
+            "❌ Missing arguments.\n" "Use <code>/dcaction help</code> for usage info.",
             parse_mode="HTML",
         )
 
-    # Handle list action first because it is not a real action
+    # Handle help command first as it is not a real action
+    if args[0] == "help":
+        return await update.message.reply_text(
+            dcaction_help(),
+            parse_mode="HTML",
+        )
+
+    # Handle list command separately as it is not a real action
     if args[0] == "list":
         dirs = list_docker_dirs()
         if not dirs:
@@ -277,31 +341,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Target: <code>{target or 'ALL'}</code>\n\n"
         "Proceed?"
     )
-
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "✅ Confirm",
-                    callback_data=dc_callback_data(
-                        "run",
-                        user_id,
-                        ts,
-                        action,
-                        target or "ALL",
-                    ),
-                ),
-                InlineKeyboardButton(
-                    "❌ Cancel",
-                    callback_data=dc_callback_data(
-                        "cancel",
-                        user_id,
-                        ts,
-                    ),
-                ),
-            ]
-        ]
-    )
+    keyboard = dc_keyboard(user_id, ts, action, target)
 
     await update.message.reply_text(
         preview,
