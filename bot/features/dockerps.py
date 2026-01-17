@@ -79,8 +79,16 @@ def _parse_started_at(started_at: str) -> datetime.datetime | None:
     if not started_at or started_at == "0001-01-01T00:00:00Z":
         return None
     try:
+        # Convert Z to UTC offset
         if started_at.endswith("Z"):
             started_at = started_at[:-1] + "+00:00"
+        # Trim nanoseconds to microseconds (6 digits)
+        if "." in started_at:
+            date_part, rest = started_at.split(".", 1)
+            frac, tz = rest.split("+", 1)
+            frac = frac[:6]  # keep microseconds only
+            started_at = f"{date_part}.{frac}+{tz}"
+
         return datetime.datetime.fromisoformat(started_at)
     except Exception:
         return None
