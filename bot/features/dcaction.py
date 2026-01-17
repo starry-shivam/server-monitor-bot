@@ -12,6 +12,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import cmd
 import time
 import hmac
 import subprocess
@@ -63,8 +64,17 @@ def list_docker_dirs() -> list[str]:
 
 def is_compose_status(dir_path: Path, status: str) -> bool:
     try:
+        # special case to check if any containers exist
+        # used for "down" action validation.
+        if status == "stack_exists":
+            command = ["docker", "compose", "ps", "-aq"]
+        else:
+            allowed = {"running", "paused", "exited"}
+            if status not in allowed:
+                raise ValueError(f"Status check failed: unsupported status '{status}'")
+            command = ["docker", "compose", "ps", "-q", "--filter", f"status={status}"]
         proc = subprocess.run(
-            ["docker", "compose", "ps", "-q", "--filter", f"status={status}"],
+            command,
             cwd=dir_path,
             capture_output=True,
             text=True,
@@ -93,10 +103,8 @@ def run_single_dc(action: str, name: str) -> str:
         raise RuntimeError("Containers are already running")
     elif action == "stop" and not is_compose_status(dir_path, "running"):
         raise RuntimeError("Containers are already stopped")
-    elif action == "pause" and is_compose_status(dir_path, "paused"):
-        raise RuntimeError("Containers are already paused")
-    elif action == "unpause" and not is_compose_status(dir_path, "paused"):
-        raise RuntimeError("Containers are not paused")
+    elif action == "down" and not is_compose_status(dir_path, "stack_exists"):
+        raise RuntimeError("No containers to bring down")
 
     outputs: list[str] = []
 
