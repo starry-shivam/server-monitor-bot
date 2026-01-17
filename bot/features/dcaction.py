@@ -225,7 +225,7 @@ def dcaction_help() -> str:
     return (
         "🐋 <b>Docker Compose Action Command</b>\n\n"
         "Use <code>/dcaction</code> to manage your Docker Compose applications.\n\n"
-        "<b>Usage:</b>\n"
+        "<b>Available Commands:</b>\n"
         "‣ <code>/dcaction list</code>\n"
         "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
@@ -241,6 +241,9 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
+        "\n\n"
+        "<i>Note:</i> Replace <code>&lt;dir&gt;</code> with the name of the "
+        "docker app directory as listed in <code>/dcaction list</code>."
     )
 
 
