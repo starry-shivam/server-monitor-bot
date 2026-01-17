@@ -242,7 +242,7 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
         "\n\n"
-        "<i>Note:</i> Replace <code>&lt;dir&gt;</code> with the name of the "
+        "<b>Note:</b> Replace <code>&lt;dir&gt;</code> with the name of your "
         "docker app directory as listed in <code>/dcaction list</code>."
     )
 
