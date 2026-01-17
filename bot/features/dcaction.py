@@ -102,7 +102,6 @@ def run_single_dc(action: str, name: str) -> str:
 
     # Internal helper to run docker compose commands
     def _run_cmd(args: list[str]) -> None:
-        """Internal helper to run docker compose commands."""
         proc = subprocess.run(
             ["docker", "compose"] + args,
             cwd=dir_path,
