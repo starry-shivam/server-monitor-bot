@@ -260,7 +260,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not args:
         return await update.message.reply_text(
-            "❌ Missing arguments.\n" "Use <code>/dcaction help</code> for usage info.",
+            "❌ Missing arguments.\n" "Run <code>/dcaction help</code> for usage info.",
             parse_mode="HTML",
         )
 
