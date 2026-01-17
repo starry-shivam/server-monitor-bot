@@ -57,11 +57,11 @@ DC_ALLOWED_ACTIONS = [
     "build",
     "up",
     "stop",
-    "pause",
-    "unpause",
+    # "pause",
+    # "unpause",
+    "down",
     "update",
     "logs",
-    "down",
     "restart",
 ]
 # Actions that support --all flag

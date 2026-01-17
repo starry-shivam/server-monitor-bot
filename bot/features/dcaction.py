@@ -233,13 +233,13 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction up --all</code>\n"
         "‣ <code>/dcaction stop &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction stop --all</code>\n"
-        "‣ <code>/dcaction pause &lt;dir&gt;</code>\n"
-        "‣ <code>/dcaction pause --all</code>\n"
-        "‣ <code>/dcaction unpause &lt;dir&gt;</code>\n"
-        "‣ <code>/dcaction unpause --all</code>\n"
+        # "‣ <code>/dcaction pause &lt;dir&gt;</code>\n"
+        # "‣ <code>/dcaction pause --all</code>\n"
+        # "‣ <code>/dcaction unpause &lt;dir&gt;</code>\n"
+        # "‣ <code>/dcaction unpause --all</code>\n"
+        "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
-        "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
     )
 
