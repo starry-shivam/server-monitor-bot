@@ -36,7 +36,6 @@ from bot.config import (
 )
 from bot.auth import restricted
 
-
 # ================= In-Memory Command Store =================
 
 _SHELL_PENDING: dict[str, dict] = {}

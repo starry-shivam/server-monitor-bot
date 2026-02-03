@@ -29,7 +29,6 @@ from bot.features import cb_sign
 from bot.auth import restricted
 from bot.config import CALLBACK_TTL
 
-
 log = logging.getLogger(__name__)
 
 # ================= Configuration =================

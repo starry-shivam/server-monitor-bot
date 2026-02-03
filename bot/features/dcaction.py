@@ -35,7 +35,6 @@ from bot.config import (
 )
 from bot.auth import restricted
 
-
 # ================= Docker Compose Utils =================
 
 

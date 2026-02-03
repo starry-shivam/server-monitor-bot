@@ -29,8 +29,8 @@ from telegram.ext import (
 )
 
 from bot.auth import restricted
-from bot.config import BOT_TOKEN, POWER_MGMT_AVAILABLE
-from bot.jobs import notify_boot_job, watchdog_job
+from bot.config import BOT_TOKEN, POWER_MGMT_AVAILABLE, LIVE_FETCH_IN_LOG
+from bot.jobs import notify_boot_job, watchdog_job, live_fastfetch
 
 # Feature imports
 from bot.features.fetch import fetch, fetch_callback
@@ -175,6 +175,11 @@ def main():
     app.job_queue.run_repeating(
         watchdog_job, interval=60, first=30, job_kwargs={"misfire_grace_time": 5}
     )
+
+    if LIVE_FETCH_IN_LOG:
+        app.job_queue.run_repeating(
+            live_fastfetch, interval=60, first=5, job_kwargs={"misfire_grace_time": 10}
+        )
 
     print("🤖 Bot is running…")
     app.run_polling()
