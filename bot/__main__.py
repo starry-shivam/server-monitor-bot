@@ -15,6 +15,7 @@
 import time
 import requests as r
 import psutil
+import datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
@@ -186,11 +187,10 @@ def main():
     )
 
     if NOTIFY_DOCKER_UPDATES:
-        app.job_queue.run_repeating(
+        app.job_queue.run_daily(
             dcupdate_job,
-            interval=(3600 * 12),
-            first=60,
-            job_kwargs={"misfire_grace_time": 30},
+            time=datetime.time(hour=1, minute=0),
+            job_kwargs={"misfire_grace_time": 60},
         )
 
     if LIVE_FETCH_IN_LOG:
