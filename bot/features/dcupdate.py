@@ -19,6 +19,7 @@ import json
 import platform
 import shutil
 
+from matplotlib import image
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -198,10 +199,9 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         final_text = f"📦 <b>{header}</b>\n\n"
 
-        for app, services in results.items():
-            for service in services:
-                image = service.replace("• <b>", "").replace("</b>", "")
-                final_text += f"• <b>{app}</b> ({image})\n"
+        for app, updates in results.items():
+            image = updates[0].split("(")[-1].rstrip(")")
+            final_text += f"‣ <b>{app}</b> (<code>{image}</code>)\n"
         final_text += "\n"
 
         if len(results) == 1:

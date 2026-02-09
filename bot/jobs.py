@@ -108,10 +108,9 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
 
         text = f"🐳 <b>{header}</b>\n\n"
 
-        for app, services in results.items():
-            for service in services:
-                image = service.replace("• <b>", "").replace("</b>", "")
-                text += f"• <b>{app}</b> ({image})\n"
+        for app, updates in results.items():
+            image = updates[0].split("(")[-1].rstrip(")")
+            text += f"‣ <b>{app}</b> (<code>{image}</code>)\n"
         text += "\n"
 
         # suggest update command
