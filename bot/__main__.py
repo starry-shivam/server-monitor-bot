@@ -194,7 +194,10 @@ def main():
 
     if LIVE_FETCH_IN_LOG:
         app.job_queue.run_repeating(
-            live_fastfetch, interval=300, first=10, job_kwargs={"misfire_grace_time": 10}
+            live_fastfetch,
+            interval=300,
+            first=10,
+            job_kwargs={"misfire_grace_time": 10},
         )
 
     print("🤖 Bot is running…")

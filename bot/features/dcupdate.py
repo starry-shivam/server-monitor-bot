@@ -54,18 +54,14 @@ def get_remote_digest(image_name: str, arch: str) -> str | None:
 
         if proc.returncode != 0 or not proc.stdout.strip():
             return None
+
         manifest = json.loads(proc.stdout)
-        # multi-arch index
-        manifests = manifest.get("manifests", [])
-        for m in manifests:
+        for m in manifest.get("manifests", []):
             platform = m.get("platform", {})
             if platform.get("architecture") == arch:
                 return m.get("digest")
         return None
     except Exception:
-        return None
-    except Exception as e:
-        print("Error fetching remote digest:", e)
         return None
 
 
@@ -96,7 +92,6 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
             continue
 
         try:
-            # Get container name and image tag
             fmt = "{{.Name}}|{{.Config.Image}}"
             info_proc = subprocess.run(
                 ["docker", "inspect", f"--format={fmt}", cid],
@@ -110,35 +105,41 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
             name, image_tag = info_proc.stdout.strip().split("|")
             name = name.lstrip("/")
 
-            # docker implies :latest when no tag present
             if ":" not in image_tag:
                 image_tag += ":latest"
 
-            # Get local image ID used by container
-            local_proc = subprocess.run(
-                ["docker", "inspect", "--format={{.Image}}", cid],
+            img_proc = subprocess.run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    image_tag,
+                    "--format={{json .RepoDigests}}",
+                ],
                 capture_output=True,
                 text=True,
             )
 
-            if local_proc.returncode != 0:
+            if img_proc.returncode != 0 or img_proc.stdout.strip() in ("", "null"):
                 continue
 
-            local_image_id = local_proc.stdout.strip()
+            local_repo_digests = json.loads(img_proc.stdout)
 
-            # Get remote digest for this image
+            if not local_repo_digests:
+                continue
+            local_digest = local_repo_digests[0].split("@")[-1]
             remote_digest = get_remote_digest(image_tag, system_arch)
             if not remote_digest:
                 continue
 
-            # Compare remote vs local
-            if remote_digest not in local_image_id:
+            if local_digest != remote_digest:
                 updates_found.append(f"• <b>{name}</b> ({image_tag})")
 
         except Exception:
             continue
 
     return updates_found
+
 
 # ================= Manual Command Handler =================
 
