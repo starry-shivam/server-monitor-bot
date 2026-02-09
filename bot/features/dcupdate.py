@@ -45,27 +45,25 @@ def get_system_arch() -> str:
 
 def get_remote_digest(image_name: str, arch: str) -> str | None:
     try:
-        cmd = ["docker", "manifest", "inspect", image_name]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        proc = subprocess.run(
+            ["docker", "manifest", "inspect", image_name],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
 
         if proc.returncode != 0 or not proc.stdout.strip():
             return None
-
         manifest = json.loads(proc.stdout)
-        manifests = manifest.get("manifests")
-        if manifests:
-            for m in manifests:
-                platform = m.get("platform", {})
-                if platform.get("architecture") == arch:
-                    return m.get("digest")
-
-            return manifests[0].get("digest")
-        
-        if manifest.get("mediaType", "").endswith("manifest.v2+json"):
-            return manifest.get("config", {}).get("digest")
-
+        # multi-arch index
+        manifests = manifest.get("manifests", [])
+        for m in manifests:
+            platform = m.get("platform", {})
+            if platform.get("architecture") == arch:
+                return m.get("digest")
         return None
-
+    except Exception:
+        return None
     except Exception as e:
         print("Error fetching remote digest:", e)
         return None
@@ -75,7 +73,7 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     dir_path = DOCKER_APPS_DIR / dir_name
     if not dir_path.exists() or not has_compose_file(dir_path):
         return []
-    # Get running containers IDs
+
     try:
         proc = subprocess.run(
             ["docker", "compose", "ps", "-q"],
@@ -96,9 +94,10 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     for cid in ids:
         if not cid:
             continue
+
         try:
-            # Get Container Info: Name, Defined Image Tag, and Current Repo Digest
-            fmt = "{{.Name}}|{{.Config.Image}}|{{json .RepoDigests}}"
+            # Get container name and image tag
+            fmt = "{{.Name}}|{{.Config.Image}}"
             info_proc = subprocess.run(
                 ["docker", "inspect", f"--format={fmt}", cid],
                 capture_output=True,
@@ -108,36 +107,38 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
             if info_proc.returncode != 0:
                 continue
 
-            name, image_tag, digests_json = info_proc.stdout.strip().split("|")
+            name, image_tag = info_proc.stdout.strip().split("|")
             name = name.lstrip("/")
-            local_digests = json.loads(digests_json) if digests_json != "null" else []
 
-            # If no tag is specified, docker implies ':latest'
+            # docker implies :latest when no tag present
             if ":" not in image_tag:
                 image_tag += ":latest"
 
-            # Skip if we can't find a local digest (usually local-built images)
-            if not local_digests:
+            # Get local image ID used by container
+            local_proc = subprocess.run(
+                ["docker", "inspect", "--format={{.Image}}", cid],
+                capture_output=True,
+                text=True,
+            )
+
+            if local_proc.returncode != 0:
                 continue
 
-            # Get Remote Digest
-            remote_digest = get_remote_digest(image_tag, system_arch)
+            local_image_id = local_proc.stdout.strip()
 
+            # Get remote digest for this image
+            remote_digest = get_remote_digest(image_tag, system_arch)
             if not remote_digest:
                 continue
 
-            # Compare Remote vs Local
-            # If the remote digest is NOT in our local list, an update exists.
-            is_up_to_date = any(remote_digest in ld for ld in local_digests)
-
-            if not is_up_to_date:
+            # Compare remote vs local
+            if remote_digest not in local_image_id:
                 updates_found.append(f"• <b>{name}</b> ({image_tag})")
 
         except Exception:
             continue
 
     return updates_found
-
 
 # ================= Manual Command Handler =================
 
