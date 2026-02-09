@@ -21,6 +21,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+# ruff cache
+.ruff_cache/
 
 # ======================
 # Logs & runtime files

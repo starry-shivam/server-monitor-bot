@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025-Present Stɑrry Shivɑm <starry@krsh.dev>
+# All Rights Reserved. // This file is a part of server-monitor-bot
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# Note: This module depends on another module (dcaction.py) for some shared utilities.
+
+import subprocess
+import json
+import platform
+import shutil
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from bot.auth import restricted
+from bot.config import DOCKER_APPS_DIR, DC_IGNORE_DIRS
+from bot.features.dcaction import list_docker_dirs, has_compose_file
+
+# ================= System Helpers =================
+
+
+def get_system_arch() -> str:
+    machine = platform.machine().lower()
+
+    if machine == "x86_64":
+        return "amd64"
+    elif machine == "aarch64":
+        return "arm64"
+    elif machine.startswith("arm"):
+        # Covers armv7l, etc.
+        return "arm"
+
+    return "amd64"  # Default fallback
+
+
+def get_remote_digest(image_name: str, arch: str) -> str | None:
+    try:
+        # We use 'manifest inspect' to peek at the remote registry
+        cmd = ["docker", "manifest", "inspect", image_name]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+
+        if proc.returncode != 0:
+            return None
+
+        manifest = json.loads(proc.stdout)
+
+        # Handle multi-arch manifest lists
+        if "manifests" in manifest:
+            for m in manifest["manifests"]:
+                m_arch = m.get("platform", {}).get("architecture")
+                if m_arch == arch:
+                    return m.get("digest")
+            # If specific architecture not found, return the first one
+            return manifest["manifests"][0].get("digest")
+
+        # Handle Single Manifest (V2 Schema 2)
+        if "config" in manifest:
+            return manifest["config"].get("digest")
+
+        return None
+    except Exception:
+        return None
+
+
+def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
+    dir_path = DOCKER_APPS_DIR / dir_name
+    if not dir_path.exists() or not has_compose_file(dir_path):
+        return []
+    # Get running containers IDs
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "ps", "-q"],
+            cwd=dir_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        ids = proc.stdout.strip().splitlines()
+    except Exception:
+        return []
+
+    if not ids:
+        return []
+
+    updates_found = []
+
+    for cid in ids:
+        if not cid:
+            continue
+        try:
+            # Get Container Info: Name, Defined Image Tag, and Current Repo Digest
+            fmt = "{{.Name}}|{{.Config.Image}}|{{json .RepoDigests}}"
+            info_proc = subprocess.run(
+                ["docker", "inspect", f"--format={fmt}", cid],
+                capture_output=True,
+                text=True,
+            )
+
+            if info_proc.returncode != 0:
+                continue
+
+            name, image_tag, digests_json = info_proc.stdout.strip().split("|")
+            name = name.lstrip("/")
+            local_digests = json.loads(digests_json) if digests_json != "null" else []
+
+            # If no tag is specified, docker implies ':latest'
+            if ":" not in image_tag:
+                image_tag += ":latest"
+
+            # Skip if we can't find a local digest (usually local-built images)
+            if not local_digests:
+                continue
+
+            # Get Remote Digest
+            remote_digest = get_remote_digest(image_tag, system_arch)
+
+            if not remote_digest:
+                continue
+
+            # Compare Remote vs Local
+            # If the remote digest is NOT in our local list, an update exists.
+            is_up_to_date = any(remote_digest in ld for ld in local_digests)
+
+            if not is_up_to_date:
+                updates_found.append(f"• <b>{name}</b> ({image_tag})")
+
+        except Exception:
+            continue
+
+    return updates_found
+
+
+# ================= Manual Command Handler =================
+
+
+@restricted
+async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    user_msg = update.message
+
+    if not shutil.which("docker"):
+        return await update.message.reply_text(
+            "❌ Docker CLI not found on this system."
+        )
+
+    status_msg = await user_msg.reply_text(
+        "🔎 <b>Checking registries for updates...</b>", parse_mode="HTML"
+    )
+
+    targets = []
+    if not args or args[0] == "--all":
+        targets = list_docker_dirs()
+    else:
+        target_dir = args[0]
+        if target_dir in DC_IGNORE_DIRS:
+            await status_msg.edit_text(
+                f"🚫 Directory <code>{target_dir}</code> is ignored."
+            )
+            return
+
+        if (DOCKER_APPS_DIR / target_dir).exists():
+            targets = [target_dir]
+        else:
+            await status_msg.edit_text(
+                f"❌ Directory <code>{target_dir}</code> not found."
+            )
+            return
+
+    system_arch = get_system_arch()
+    results = {}
+
+    try:
+        for app_dir in targets:
+            updates = check_dir_updates(app_dir, system_arch)
+            if updates:
+                results[app_dir] = updates
+
+    except Exception as e:
+        await status_msg.edit_text(
+            f"❌ <b>Error:</b>\n<code>{str(e)}</code>", parse_mode="HTML"
+        )
+        return
+
+    if not results:
+        final_text = "✅ <b>All containers are up to date.</b>"
+    else:
+        final_text = "📦 <b>Updates Available:</b>\n\n"
+        for app, services in results.items():
+            final_text += f"📂 <b>{app}</b>\n"
+            final_text += "\n".join(services)
+            final_text += "\n\n"
+
+        final_text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to apply.</i>"
+
+    await status_msg.edit_text(final_text, parse_mode="HTML")

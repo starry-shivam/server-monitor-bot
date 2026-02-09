@@ -28,6 +28,7 @@ CALLBACK_TTL = int(os.getenv("CALLBACK_TTL", "300"))  # seconds
 CALLBACK_SIG_SECRET = os.getenv("CALLBACK_SIG_SECRET", uuid.uuid4().hex)
 POWER_MGMT_AVAILABLE = os.getenv("POWER_MGMT_AVAILABLE", "false").lower() == "true"
 LIVE_FETCH_IN_LOG = os.getenv("LIVE_FETCH_IN_LOG", "false").lower() == "true"
+NOTIFY_DOCKER_UPDATES = os.getenv("NOTIFY_DOCKER_UPDATES", "false").lower() == "true"
 ADDITIONAL_DRIVE_PATHS = [
     x.strip() for x in os.getenv("ADDITIONAL_DRIVE_PATHS", "").split(",") if x.strip()
 ]

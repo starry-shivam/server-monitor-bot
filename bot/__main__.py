@@ -29,13 +29,19 @@ from telegram.ext import (
 )
 
 from bot.auth import restricted
-from bot.config import BOT_TOKEN, POWER_MGMT_AVAILABLE, LIVE_FETCH_IN_LOG
-from bot.jobs import notify_boot_job, watchdog_job, live_fastfetch
+from bot.config import (
+    BOT_TOKEN,
+    POWER_MGMT_AVAILABLE,
+    LIVE_FETCH_IN_LOG,
+    NOTIFY_DOCKER_UPDATES,
+)
+from bot.jobs import notify_boot_job, watchdog_job, live_fastfetch, dcupdate_job
 
 # Feature imports
 from bot.features.fetch import fetch, fetch_callback
 from bot.features.dockerps import dockerps, dockerps_callback
 from bot.features.dcaction import dcaction, dcaction_callback
+from bot.features.dcupdate import dcupdate
 from bot.features.powerc import powerc, powerc_callback
 from bot.features.powerm import reboot, poweroff, power_callback
 from bot.features.metrics import metrics, metrics_callback
@@ -132,6 +138,7 @@ def main():
         "fetch": fetch,
         "dockerps": dockerps,
         "dcaction": dcaction,
+        "dcupdate": dcupdate,
         "powerc": powerc,
         "metrics": metrics,
         "shell": shell,
@@ -169,12 +176,21 @@ def main():
     for pattern, handler in CALLBACK_HANDLERS.items():
         app.add_handler(CallbackQueryHandler(handler, pattern=pattern))
 
+    # Jobs
     app.job_queue.run_once(
         notify_boot_job, when=0.5, job_kwargs={"misfire_grace_time": None}
     )
     app.job_queue.run_repeating(
         watchdog_job, interval=60, first=30, job_kwargs={"misfire_grace_time": 5}
     )
+
+    if NOTIFY_DOCKER_UPDATES:
+        app.job_queue.run_repeating(
+            dcupdate_job,
+            interval=(3600 * 12),
+            first=60,
+            job_kwargs={"misfire_grace_time": 30},
+        )
 
     if LIVE_FETCH_IN_LOG:
         app.job_queue.run_repeating(

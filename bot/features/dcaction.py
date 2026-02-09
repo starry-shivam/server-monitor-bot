@@ -14,6 +14,7 @@
 
 import time
 import hmac
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -251,12 +252,18 @@ def dcaction_help() -> str:
 @restricted
 async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
-
+    # Check if docker CLI is available
+    if not shutil.which("docker"):
+        return await update.message.reply_text(
+            "❌ Docker CLI not found on this system."
+        )
+    # Check if docker apps directory exists
     if not DOCKER_APPS_DIR.exists():
         return await update.message.reply_text(
-            "❌ Docker apps directory is not configured."
+            "❌ Docker apps directory not found. Please create it first.",
+            parse_mode="HTML",
         )
-
+    # If no arguments provided, show docker action help
     if not args:
         return await update.message.reply_text(
             "❌ Missing arguments.\n" "Run <code>/dcaction help</code> for usage info.",

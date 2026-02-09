@@ -17,8 +17,10 @@ import psutil
 from pathlib import Path
 from contextlib import suppress
 
-from bot.config import LOG_CHANNEL_ID
+from bot.config import LOG_CHANNEL_ID, DC_IGNORE_DIRS
 from bot.features.fetch import run_fastfetch
+from bot.features.dcupdate import check_dir_updates, get_system_arch
+from bot.features.dcaction import list_docker_dirs
 from telegram.ext import ContextTypes
 
 # --- Alert watchdog data ---
@@ -74,6 +76,33 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
             chat_id=LOG_CHANNEL_ID,
             text=f"📈 *High RAM Usage:* `{mem_pct:.1f}%`",
             parse_mode="Markdown",
+        )
+
+
+async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
+    system_arch = get_system_arch()
+    dirs = list_docker_dirs()
+    results = {}
+
+    for app_dir in dirs:
+        if app_dir in DC_IGNORE_DIRS:
+            continue
+
+        updates = check_dir_updates(app_dir, system_arch)
+        if updates:
+            results[app_dir] = updates
+
+    if results:
+        text = "🔔 <b>Container Updates Available</b>\n\n"
+        for app, services in results.items():
+            text += f"📂 <b>{app}</b>\n"
+            text += "\n".join(services)
+            text += "\n\n"
+
+        text += "<i>Use /dcaction to update.</i>"
+
+        await context.bot.send_message(
+            chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML"
         )
 
 
