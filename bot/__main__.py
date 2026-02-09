@@ -67,6 +67,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Hello {user.first_name}! Here are the available commands:\n",
         "‣ <code>/fetch</code> — Display system information using Fastfetch",
         "‣ <code>/dockerps</code> — Show Docker containers",
+        "‣ <code>/dcupdate</code> — Check for Docker container updates",
         "‣ <code>/powerc</code> — Display Pi 5 power usage",
         "‣ <code>/metrics</code> — Visual CPU, RAM, disk usage",
         "‣ <code>/ping</code> — Measure Telegram API latency",
