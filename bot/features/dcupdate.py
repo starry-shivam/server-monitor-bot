@@ -193,9 +193,9 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not results:
         final_text = "✅ <b>All containers are up to date.</b>"
     else:
-        header = "Docker updates available"
+        header = "Container updates available"
         if len(results) == 1:
-            header = "Docker update available"
+            header = "Container update available"
 
         final_text = f"📦 <b>{header}</b>\n\n"
 
