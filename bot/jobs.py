@@ -106,7 +106,7 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         if len(results) == 1:
             header = "Container update available"
 
-        text = f"🔔 <b>{header}</b>\n\n"
+        text = f"🐳 <b>{header}</b>\n\n"
 
         for app, services in results.items():
             for service in services:
