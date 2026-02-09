@@ -75,3 +75,6 @@ DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
 DC_IGNORE_DIRS = [
     x.strip() for x in os.getenv("DC_IGNORE_DIRS", "").split(",") if x.strip()
 ]
+DC_IGNORE_UPDATE_NOTIF_DIRS = [
+    x.strip() for x in os.getenv("DC_IGNORE_UPDATE_NOTIF_DIRS", "").split(",") if x.strip()
+]

@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from contextlib import suppress
 
-from bot.config import LOG_CHANNEL_ID, DC_IGNORE_DIRS
+from bot.config import LOG_CHANNEL_ID, DC_IGNORE_DIRS, DC_IGNORE_UPDATE_NOTIF_DIRS
 from bot.features.fetch import run_fastfetch
 from bot.features.dcupdate import check_dir_updates, get_system_arch
 from bot.features.dcaction import list_docker_dirs
@@ -92,7 +92,10 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         for app_dir in dirs:
             if app_dir in DC_IGNORE_DIRS:
                 continue
-
+            if app_dir in DC_IGNORE_UPDATE_NOTIF_DIRS:
+                logger.info(f"Skipping update check for {app_dir} (notification ignored)")
+                continue
+            
             updates = check_dir_updates(app_dir, system_arch)
             if updates:
                 results[app_dir] = updates
