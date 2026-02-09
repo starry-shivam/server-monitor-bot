@@ -46,23 +46,21 @@ def get_system_arch() -> str:
 def get_remote_digest(image_name: str, arch: str) -> str | None:
     try:
         proc = subprocess.run(
-            ["docker", "manifest", "inspect", image_name],
+            ["docker", "buildx", "imagetools", "inspect", image_name],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=60,
         )
-
-        if proc.returncode != 0 or not proc.stdout.strip():
+        if proc.returncode != 0:
             return None
 
-        manifest = json.loads(proc.stdout)
-        for m in manifest.get("manifests", []):
-            platform = m.get("platform", {})
-            if platform.get("architecture") == arch:
-                return m.get("digest")
+        for line in proc.stdout.splitlines():
+            if line.startswith("Digest:"):
+                return line.split("Digest:")[1].strip()
         return None
     except Exception:
         return None
+
 
 
 def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
