@@ -14,7 +14,6 @@
 
 import time
 import psutil
-import logging
 from pathlib import Path
 from contextlib import suppress
 
@@ -23,8 +22,6 @@ from bot.features.fetch import run_fastfetch
 from bot.features.dcupdate import check_dir_updates, get_system_arch
 from bot.features.dcaction import list_docker_dirs
 from telegram.ext import ContextTypes
-
-logger = logging.getLogger(__name__)
 
 # --- Alert watchdog data ---
 last_alert = {"temp": 0.0, "ram": 0.0}
@@ -83,7 +80,7 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Checking for docker container updates...")
+    print("[dcupdate] Checking for container updates...")
     try:
         system_arch = get_system_arch()
         dirs = list_docker_dirs()
@@ -93,15 +90,17 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
             if app_dir in DC_IGNORE_DIRS:
                 continue
             if app_dir in DC_IGNORE_UPDATE_NOTIF_DIRS:
-                logger.info(f"Skipping update check for {app_dir} (notification ignored)")
+                print(
+                    f"[dcupdate] Skipping update check for {app_dir} (notification suppressed)"
+                )
                 continue
-            
+
             updates = check_dir_updates(app_dir, system_arch)
             if updates:
                 results[app_dir] = updates
 
         if not results:
-            logger.info("No container updates found.")
+            print("[dcupdate] No updates found.")
             return  # silent when nothing new
 
         # formatting
@@ -119,7 +118,7 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         # suggest update command
         if len(results) == 1:
             app_name = next(iter(results))
-            text  += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
+            text += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
         else:
             text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app.</i>"
 
@@ -128,7 +127,7 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        logger.error(f"Error in dcupdate_job: {e}")
+        print("Error in dcupdate job:", e)
         await context.bot.send_message(
             chat_id=LOG_CHANNEL_ID,
             text=f"❌ dcupdate job error:\n<code>{e}</code>",

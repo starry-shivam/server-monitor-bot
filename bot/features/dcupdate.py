@@ -19,7 +19,6 @@ import json
 import platform
 import shutil
 
-from matplotlib import image
 from telegram import Update
 from telegram.ext import ContextTypes
 
