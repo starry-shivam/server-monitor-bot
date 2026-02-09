@@ -45,30 +45,29 @@ def get_system_arch() -> str:
 
 def get_remote_digest(image_name: str, arch: str) -> str | None:
     try:
-        # We use 'manifest inspect' to peek at the remote registry
         cmd = ["docker", "manifest", "inspect", image_name]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
 
-        if proc.returncode != 0:
+        if proc.returncode != 0 or not proc.stdout.strip():
             return None
 
         manifest = json.loads(proc.stdout)
-
-        # Handle multi-arch manifest lists
-        if "manifests" in manifest:
-            for m in manifest["manifests"]:
-                m_arch = m.get("platform", {}).get("architecture")
-                if m_arch == arch:
+        manifests = manifest.get("manifests")
+        if manifests:
+            for m in manifests:
+                platform = m.get("platform", {})
+                if platform.get("architecture") == arch:
                     return m.get("digest")
-            # If specific architecture not found, return the first one
-            return manifest["manifests"][0].get("digest")
 
-        # Handle Single Manifest (V2 Schema 2)
-        if "config" in manifest:
-            return manifest["config"].get("digest")
+            return manifests[0].get("digest")
+        
+        if manifest.get("mediaType", "").endswith("manifest.v2+json"):
+            return manifest.get("config", {}).get("digest")
 
         return None
-    except Exception:
+
+    except Exception as e:
+        print("Error fetching remote digest:", e)
         return None
 
 
