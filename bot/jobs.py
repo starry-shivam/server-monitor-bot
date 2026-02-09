@@ -118,9 +118,9 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         # suggest update command
         if len(results) == 1:
             app_name = next(iter(results))
-            text += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
+            text += f"Run <code>/dcaction update {app_name}</code> to update this app."
         else:
-            text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app.</i>"
+            text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
 
         await context.bot.send_message(
             chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML"

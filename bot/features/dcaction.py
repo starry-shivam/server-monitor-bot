@@ -257,12 +257,14 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "❌ Docker CLI not found on this system."
         )
+
     # Check if docker apps directory exists
     if not DOCKER_APPS_DIR.exists():
         return await update.message.reply_text(
             "❌ Docker apps directory not found. Please create it first.",
             parse_mode="HTML",
         )
+
     # If no arguments provided, show docker action help
     if not args:
         return await update.message.reply_text(

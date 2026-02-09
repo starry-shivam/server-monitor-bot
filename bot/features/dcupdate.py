@@ -87,7 +87,6 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     for cid in ids:
         if not cid:
             continue
-
         try:
             fmt = "{{.Name}}|{{.Config.Image}}"
             info_proc = subprocess.run(
@@ -205,8 +204,10 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(results) == 1:
             app_name = next(iter(results))
-            final_text += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
+            final_text += (
+                f"Run <code>/dcaction update {app_name}</code> to update this app."
+            )
         else:
-            final_text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app.</i>"
+            final_text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
 
     await status_msg.edit_text(final_text, parse_mode="HTML")
