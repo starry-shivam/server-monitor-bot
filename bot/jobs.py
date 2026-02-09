@@ -14,6 +14,7 @@
 
 import time
 import psutil
+import logging
 from pathlib import Path
 from contextlib import suppress
 
@@ -22,6 +23,8 @@ from bot.features.fetch import run_fastfetch
 from bot.features.dcupdate import check_dir_updates, get_system_arch
 from bot.features.dcaction import list_docker_dirs
 from telegram.ext import ContextTypes
+
+logger = logging.getLogger(__name__)
 
 # --- Alert watchdog data ---
 last_alert = {"temp": 0.0, "ram": 0.0}
@@ -80,29 +83,54 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
-    system_arch = get_system_arch()
-    dirs = list_docker_dirs()
-    results = {}
+    logger.info("Checking for docker container updates...")
+    try:
+        system_arch = get_system_arch()
+        dirs = list_docker_dirs()
+        results = {}
 
-    for app_dir in dirs:
-        if app_dir in DC_IGNORE_DIRS:
-            continue
+        for app_dir in dirs:
+            if app_dir in DC_IGNORE_DIRS:
+                continue
 
-        updates = check_dir_updates(app_dir, system_arch)
-        if updates:
-            results[app_dir] = updates
+            updates = check_dir_updates(app_dir, system_arch)
+            if updates:
+                results[app_dir] = updates
 
-    if results:
-        text = "🔔 <b>Container Updates Available</b>\n\n"
+        if not results:
+            logger.info("No container updates found.")
+            return  # silent when nothing new
+
+        # formatting
+        header = "Container updates available"
+        if len(results) == 1:
+            header = "Container update available"
+
+        text = f"🔔 <b>{header}</b>\n\n"
+
         for app, services in results.items():
-            text += f"📂 <b>{app}</b>\n"
-            text += "\n".join(services)
-            text += "\n\n"
+            for service in services:
+                image = service.replace("• <b>", "").replace("</b>", "")
+                text += f"• <b>{app}</b> ({image})\n"
+        text += "\n"
 
-        text += "<i>Use /dcaction to update.</i>"
+        # suggest update command
+        if len(results) == 1:
+            app_name = next(iter(results))
+            text  += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
+        else:
+            text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app.</i>"
 
         await context.bot.send_message(
             chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in dcupdate_job: {e}")
+        await context.bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=f"❌ dcupdate job error:\n<code>{e}</code>",
+            parse_mode="HTML",
         )
 
 

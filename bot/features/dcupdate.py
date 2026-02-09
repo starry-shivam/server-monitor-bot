@@ -62,7 +62,6 @@ def get_remote_digest(image_name: str, arch: str) -> str | None:
         return None
 
 
-
 def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     dir_path = DOCKER_APPS_DIR / dir_name
     if not dir_path.exists() or not has_compose_file(dir_path):
@@ -193,12 +192,22 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not results:
         final_text = "✅ <b>All containers are up to date.</b>"
     else:
-        final_text = "📦 <b>Updates Available:</b>\n\n"
-        for app, services in results.items():
-            final_text += f"📂 <b>{app}</b>\n"
-            final_text += "\n".join(services)
-            final_text += "\n\n"
+        header = "Docker updates available"
+        if len(results) == 1:
+            header = "Docker update available"
 
-        final_text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to apply.</i>"
+        final_text = f"📦 <b>{header}</b>\n\n"
+
+        for app, services in results.items():
+            for service in services:
+                image = service.replace("• <b>", "").replace("</b>", "")
+                final_text += f"• <b>{app}</b> ({image})\n"
+        final_text += "\n"
+
+        if len(results) == 1:
+            app_name = next(iter(results))
+            final_text += f"<i>Run <code>/dcaction update {app_name}</code> to update this app.</i>"
+        else:
+            final_text += "<i>Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app.</i>"
 
     await status_msg.edit_text(final_text, parse_mode="HTML")
