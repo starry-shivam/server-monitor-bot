@@ -77,6 +77,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "----------------------------------",
         "‣ <code>/dcaction</code> — Manage Docker Compose apps",
         "    ├ <code>/dcaction list</code>",
+        "    ├ <code>/dcaction config &lt;dir&gt;</code>",
         "    ├ <code>/dcaction pull &lt;dir&gt;</code>",
         "    ├ <code>/dcaction build &lt;dir&gt;</code>",
         "    ├ <code>/dcaction up &lt;dir&gt;</code>",

@@ -233,7 +233,7 @@ def dcaction_help() -> str:
         "Use <code>/dcaction</code> to manage your Docker Compose applications.\n\n"
         "<b>Available Commands:</b>\n"
         "‣ <code>/dcaction list</code>\n"
-        "‣ <code>/dcaction show &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction config &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
