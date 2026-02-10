@@ -55,12 +55,11 @@ SHELL_MAX_OUTPUT = int(os.getenv("SHELL_MAX_OUTPUT", "3600"))
 
 # --- Docker action config ---
 DC_ALLOWED_ACTIONS = [
+    "config",
     "pull",
     "build",
     "up",
     "stop",
-    # "pause",
-    # "unpause",
     "down",
     "update",
     "logs",

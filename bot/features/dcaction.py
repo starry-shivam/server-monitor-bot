@@ -233,6 +233,7 @@ def dcaction_help() -> str:
         "Use <code>/dcaction</code> to manage your Docker Compose applications.\n\n"
         "<b>Available Commands:</b>\n"
         "‣ <code>/dcaction list</code>\n"
+        "‣ <code>/dcaction show &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
@@ -354,6 +355,14 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Target: <code>{target or 'ALL'}</code>\n\n"
         "Proceed?"
     )
+    # Config prints compose file with environment variables etc resolved
+    # so show a warning about potential sensitive info leakage
+    if action == "config":
+        preview += (
+            "\n\n<pre>Note: This may leak sensitive information, such as environment variables "
+            "and secret keys. It is recommended to run this only in private chats and not in groups.</pre>"
+        )
+
     keyboard = dc_keyboard(user_id, ts, action, target)
 
     await update.message.reply_text(
