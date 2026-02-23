@@ -420,8 +420,8 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             output = run_single_dc(action, target)
 
-        if len(output) > 4000:
-            output = output[-4000:]
+        if len(output) > 2000:
+            output = output[-2000:]
 
         await q.edit_message_text(
             f"📊 <b>Execution Summary</b>\n\n<pre>{output}</pre>",

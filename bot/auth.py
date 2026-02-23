@@ -21,7 +21,6 @@ from telegram.ext import ContextTypes
 from bot.config import OWNER_IDS
 
 
-# --- Restriction decorator --- #
 def restricted(func):
     @wraps(func)
     async def wrapped(
@@ -42,12 +41,12 @@ def restricted(func):
     return wrapped
 
 
-# --- Helper function to delete messages after a delay --- #
+# Helper function to delete messages after a delay
 async def delete_later(msg: Message, delay: int = 3):
     try:
         await asyncio.sleep(delay)
         await msg.delete()
-        if msg.reply_to_message:
-            await msg.reply_to_message.delete()
+        # if msg.reply_to_message:
+        #     await msg.reply_to_message.delete()
     except Exception:
         pass
