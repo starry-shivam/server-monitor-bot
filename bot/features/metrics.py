@@ -37,7 +37,6 @@ from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
 from bot.config import ADDITIONAL_DRIVE_PATHS
 
-
 log = logging.getLogger(__name__)
 
 # ================= Refresh Control =================

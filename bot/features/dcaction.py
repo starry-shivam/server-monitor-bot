@@ -35,10 +35,8 @@ from bot.config import (
     DC_BULK_ACTIONS,
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
-    OWNER_IDS,
 )
 from bot.auth import restricted, is_authorized_callback_user
-
 
 log = logging.getLogger(__name__)
 
@@ -323,7 +321,9 @@ def parse_dc_callback(raw_data: str) -> tuple[str, int, int, str, str, str] | No
     return cb_type, int(uid), int(ts), action, target, sig
 
 
-async def validate_dc_callback(q, parsed_callback: tuple[str, int, int, str, str, str]) -> bool:
+async def validate_dc_callback(
+    q, parsed_callback: tuple[str, int, int, str, str, str]
+) -> bool:
     cb_type, uid, ts, action, target, sig = parsed_callback
     now = int(time.time())
 
@@ -370,7 +370,9 @@ async def handle_job_update_callback(q, uid: int, target: str):
     )
     try:
         if not has_dir_updates(target):
-            log_callback(log, q.from_user, "dcaction", "jobup", "up_to_date", detail=target)
+            log_callback(
+                log, q.from_user, "dcaction", "jobup", "up_to_date", detail=target
+            )
             return await q.edit_message_text(
                 f"✅ <code>{target}</code> is already up to date.",
                 parse_mode="HTML",
@@ -397,7 +399,9 @@ async def handle_job_update_callback(q, uid: int, target: str):
         )
 
 
-async def handle_job_update_all_callback(q, context: ContextTypes.DEFAULT_TYPE, uid: int, token: str):
+async def handle_job_update_all_callback(
+    q, context: ContextTypes.DEFAULT_TYPE, uid: int, token: str
+):
     await q.edit_message_text("🐋 Running updates for all apps…", parse_mode="HTML")
     key = f"dcjob:{token}"
     targets = context.bot_data.get(key)
@@ -416,32 +420,42 @@ async def handle_job_update_all_callback(q, context: ContextTypes.DEFAULT_TYPE, 
     for app_name in targets:
         try:
             if not has_dir_updates(app_name):
-                log_callback(log, q.from_user, "dcaction", "jobupall", "up_to_date", detail=app_name)
+                log_callback(
+                    log,
+                    q.from_user,
+                    "dcaction",
+                    "jobupall",
+                    "up_to_date",
+                    detail=app_name,
+                )
                 sections.append(
-                    f"<b>{app_name}</b>\n"
-                    "<code>Already up to date.</code>"
+                    f"<b>{app_name}</b>\n" "<code>Already up to date.</code>"
                 )
                 continue
 
             raw_output = run_single_dc("update", app_name)
-            log_callback(log, q.from_user, "dcaction", "jobupall", "executed", detail=app_name)
-            short_output = tail_log_lines(raw_output, per_app_lines).strip() or "No output."
-            sections.append(
-                f"<b>{app_name}</b>\n"
-                f"<pre>{short_output}</pre>"
+            log_callback(
+                log, q.from_user, "dcaction", "jobupall", "executed", detail=app_name
             )
+            short_output = (
+                tail_log_lines(raw_output, per_app_lines).strip() or "No output."
+            )
+            sections.append(f"<b>{app_name}</b>\n" f"<pre>{short_output}</pre>")
         except Exception as e:
-            log_callback(log, q.from_user, "dcaction", "jobupall", "failed", detail=f"{app_name}: {e}")
-            sections.append(
-                f"<b>{app_name}</b>\n"
-                f"<code>Update failed: {e}</code>"
+            log_callback(
+                log,
+                q.from_user,
+                "dcaction",
+                "jobupall",
+                "failed",
+                detail=f"{app_name}: {e}",
             )
+            sections.append(f"<b>{app_name}</b>\n" f"<code>Update failed: {e}</code>")
 
     summary = (
         "📊 <b>Docker Update Logs</b>\n"
         f"Updated apps: <code>{len(targets)}</code>\n"
-        f"Log lines per app: <code>{per_app_lines}</code>\n\n"
-        + "\n\n".join(sections)
+        f"Log lines per app: <code>{per_app_lines}</code>\n\n" + "\n\n".join(sections)
     )
 
     if len(summary) > 3900:
@@ -480,7 +494,9 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
     try:
         if action == "update" and target != "ALL":
             if not has_dir_updates(target):
-                log_callback(log, q.from_user, "dcaction", action, "up_to_date", detail=target)
+                log_callback(
+                    log, q.from_user, "dcaction", action, "up_to_date", detail=target
+                )
                 return await q.edit_message_text(
                     f"✅ <code>{target}</code> is already up to date.",
                     parse_mode="HTML",

@@ -26,7 +26,6 @@ from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
 from bot.features import cb_sign
 
-
 log = logging.getLogger(__name__)
 
 # --- Pre-compiled Regex ---
@@ -282,7 +281,9 @@ async def powerc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         report = format_power_report() if verbose else format_minimal_power_report()
-        log_callback(log, q.from_user, "powerc", cb, "executed", detail=f"verbose={verbose}")
+        log_callback(
+            log, q.from_user, "powerc", cb, "executed", detail=f"verbose={verbose}"
+        )
         await q.edit_message_text(
             report,
             parse_mode="Markdown",

@@ -39,7 +39,6 @@ from bot.features import cb_sign
 from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
 
-
 log = logging.getLogger(__name__)
 
 # Per-user cooldown for refresh

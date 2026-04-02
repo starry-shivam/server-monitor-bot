@@ -39,7 +39,6 @@ from bot.config import (
 )
 from bot.auth import restricted, is_authorized_callback_user
 
-
 log = logging.getLogger(__name__)
 
 # ================= In-Memory Command Store =================
@@ -96,7 +95,10 @@ def _shell_exec(command: str) -> str:
         log_security_event(log, "shell_command", "blocked", detail=command)
         raise PermissionError("Only approved read-only commands are allowed")
 
-    if any(arg.startswith("/") or arg.startswith("../") or arg.startswith("~/") for arg in parts[1:]):
+    if any(
+        arg.startswith("/") or arg.startswith("../") or arg.startswith("~/")
+        for arg in parts[1:]
+    ):
         log_security_event(log, "shell_command", "blocked", detail=command)
         raise PermissionError("Path arguments are not allowed")
 
@@ -143,7 +145,9 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ No command provided.")
 
     if any(ch in cmd for ch in SHELL_FORBIDDEN_CHARS):
-        return await update.message.reply_text("🚫 Only single read-only commands are allowed.")
+        return await update.message.reply_text(
+            "🚫 Only single read-only commands are allowed."
+        )
 
     user_id = update.effective_user.id
     ts = int(time.time())

@@ -22,7 +22,6 @@ from telegram.ext import ContextTypes
 from bot.logger import log_command, log_security_event
 from bot.config import OWNER_IDS
 
-
 log = logging.getLogger(__name__)
 
 

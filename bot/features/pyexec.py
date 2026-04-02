@@ -25,7 +25,6 @@ from telegram.ext import ContextTypes
 from bot.auth import restricted
 from bot.logger import log_callback
 
-
 log = logging.getLogger(__name__)
 
 # ================= PyExec Utils =================

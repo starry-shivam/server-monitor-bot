@@ -30,7 +30,6 @@ from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
 from bot.features import cb_sign
 
-
 log = logging.getLogger(__name__)
 
 # ================= Refresh Control =================
@@ -184,7 +183,9 @@ async def fetch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("🛰 Refreshing system info…")
 
     text = run_fastfetch(include_ip=include_ip)
-    log_callback(log, q.from_user, "fetch", cb, "executed", detail=f"include_ip={include_ip}")
+    log_callback(
+        log, q.from_user, "fetch", cb, "executed", detail=f"include_ip={include_ip}"
+    )
 
     await q.edit_message_text(
         f"```\n{text}\n```",

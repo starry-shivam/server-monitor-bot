@@ -27,7 +27,6 @@ from bot.features.dcaction import list_docker_dirs, dc_callback_data
 from telegram.ext import ContextTypes
 from bot.logger import log_job
 
-
 log = logging.getLogger(__name__)
 
 # --- Alert watchdog data ---
@@ -97,7 +96,12 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
             if app_dir in DC_IGNORE_DIRS:
                 continue
             if app_dir in DC_IGNORE_UPDATE_NOTIF_DIRS:
-                log_job(log, "dcupdate", "skipped", detail=f"notification_suppressed:{app_dir}")
+                log_job(
+                    log,
+                    "dcupdate",
+                    "skipped",
+                    detail=f"notification_suppressed:{app_dir}",
+                )
                 continue
 
             updates = check_dir_updates(app_dir, system_arch)

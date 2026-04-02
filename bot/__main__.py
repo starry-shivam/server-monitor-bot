@@ -52,7 +52,6 @@ from bot.features.metrics import metrics, metrics_callback
 from bot.features.shell import shell, shell_callback
 from bot.features.pyexec import pyexec
 
-
 log = logging.getLogger(__name__)
 
 

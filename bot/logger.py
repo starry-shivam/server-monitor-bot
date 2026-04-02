@@ -25,28 +25,41 @@ def _chat_label(chat) -> str:
     return f"chat={getattr(chat, 'id', '?')} ({title})"
 
 
-def log_command(logger: logging.Logger, update, command_name: str, status: str, detail: str = "") -> None:
+def log_command(
+    logger: logging.Logger, update, command_name: str, status: str, detail: str = ""
+) -> None:
     message = f"command={command_name} status={status} {_user_label(getattr(update, 'effective_user', None))} {_chat_label(getattr(update, 'effective_chat', None))}"
     if detail:
         message = f"{message} detail={detail}"
     logger.info(message)
 
 
-def log_callback(logger: logging.Logger, user, source: str, action: str, status: str, detail: str = "") -> None:
+def log_callback(
+    logger: logging.Logger,
+    user,
+    source: str,
+    action: str,
+    status: str,
+    detail: str = "",
+) -> None:
     message = f"callback={source} action={action} status={status} {_user_label(user)}"
     if detail:
         message = f"{message} detail={detail}"
     logger.info(message)
 
 
-def log_job(logger: logging.Logger, job_name: str, status: str, detail: str = "") -> None:
+def log_job(
+    logger: logging.Logger, job_name: str, status: str, detail: str = ""
+) -> None:
     message = f"job={job_name} status={status}"
     if detail:
         message = f"{message} detail={detail}"
     logger.info(message)
 
 
-def log_security_event(logger: logging.Logger, event: str, status: str, detail: str = "") -> None:
+def log_security_event(
+    logger: logging.Logger, event: str, status: str, detail: str = ""
+) -> None:
     message = f"security_event={event} status={status}"
     if detail:
         message = f"{message} detail={detail}"
