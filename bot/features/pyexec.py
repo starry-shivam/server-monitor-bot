@@ -15,6 +15,7 @@
 import io
 import sys
 import traceback
+import logging
 from html import escape
 from typing import Any, Callable
 
@@ -22,6 +23,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.auth import restricted
+from bot.logger import log_callback
+
+
+log = logging.getLogger(__name__)
 
 # ================= PyExec Utils =================
 
@@ -53,6 +58,8 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IndexError:
         return await msg.edit_text("❌ No code provided.")
 
+    log_callback(log, update.effective_user, "pyexec", "run", "accepted")
+
     old_stdout = sys.stdout
     redirected = sys.stdout = io.StringIO()
 
@@ -68,8 +75,10 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<b>ERRORS</b>:\n" f"<code>{escape(errors)}</code>"
 
     if len(text) > 4096:
+        log_callback(log, update.effective_user, "pyexec", "run", "completed_file")
         await msg.edit_text("Results too large. Sending as file.")
         f = io.BytesIO(text.encode())
         await update.message.reply_document(f.getvalue(), filename="output.txt")
     else:
+        log_callback(log, update.effective_user, "pyexec", "run", "completed_inline")
         await msg.edit_text(text, parse_mode="HTML")

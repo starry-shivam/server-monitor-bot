@@ -137,6 +137,11 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     return updates_found
 
 
+def has_dir_updates(dir_name: str) -> bool:
+    """Helper for checking if a specific app directory has updates."""
+    return bool(check_dir_updates(dir_name, get_system_arch()))
+
+
 # ================= Manual Command Handler =================
 
 
@@ -161,7 +166,7 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_dir = args[0]
         if target_dir in DC_IGNORE_DIRS:
             await status_msg.edit_text(
-                f"🚫 Directory <code>{target_dir}</code> is ignored."
+                f"🚫 Directory <code>{target_dir}</code> is ignored.", parse_mode="HTML"
             )
             return
 
@@ -169,7 +174,7 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             targets = [target_dir]
         else:
             await status_msg.edit_text(
-                f"❌ Directory <code>{target_dir}</code> not found."
+                f"❌ Directory <code>{target_dir}</code> not found.", parse_mode="HTML"
             )
             return
 

@@ -16,6 +16,7 @@
 import subprocess
 import time
 import hmac
+import logging
 from collections import OrderedDict
 
 from telegram import (
@@ -25,8 +26,12 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
+from bot.logger import log_callback, log_security_event
 from bot.features import cb_sign
+
+
+log = logging.getLogger(__name__)
 
 # ================= Refresh Control =================
 
@@ -141,6 +146,7 @@ async def fetch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = q.data.split(":")
 
     if len(parts) != 6 or parts[0] != "ffc":
+        log_security_event(log, "fetch_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb, uid, msg_id, include_ip, sig = parts
@@ -148,11 +154,18 @@ async def fetch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_id = int(msg_id)
     include_ip = bool(int(include_ip))
 
-    if q.from_user.id != uid:
+    if not is_authorized_callback_user(getattr(q.from_user, "id", None), uid):
+        log_security_event(
+            log,
+            "fetch_callback",
+            "blocked",
+            detail=f"uid={getattr(q.from_user, 'id', '?')} expected={uid}",
+        )
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, cb_sign(payload)):
+        log_security_event(log, "fetch_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
     now = int(time.time())
@@ -171,6 +184,7 @@ async def fetch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("🛰 Refreshing system info…")
 
     text = run_fastfetch(include_ip=include_ip)
+    log_callback(log, q.from_user, "fetch", cb, "executed", detail=f"include_ip={include_ip}")
 
     await q.edit_message_text(
         f"```\n{text}\n```",

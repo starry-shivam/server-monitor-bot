@@ -13,6 +13,7 @@
 # SOFTWARE.
 
 import time
+import logging
 import requests as r
 import psutil
 import datetime
@@ -30,11 +31,13 @@ from telegram.ext import (
 )
 
 from bot.auth import restricted
+from bot.logger import setup_logging, log_security_event
 from bot.config import (
     BOT_TOKEN,
     POWER_MGMT_AVAILABLE,
     LIVE_FETCH_IN_LOG,
     NOTIFY_DOCKER_UPDATES,
+    PYEXEC_ENABLED,
 )
 from bot.jobs import notify_boot_job, watchdog_job, live_fastfetch, dcupdate_job
 
@@ -48,6 +51,9 @@ from bot.features.powerm import reboot, poweroff, power_callback
 from bot.features.metrics import metrics, metrics_callback
 from bot.features.shell import shell, shell_callback
 from bot.features.pyexec import pyexec
+
+
+log = logging.getLogger(__name__)
 
 
 @restricted
@@ -72,8 +78,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "‣ <code>/powerc</code> — Display Pi 5 power usage",
         "‣ <code>/metrics</code> — Visual CPU, RAM, disk usage",
         "‣ <code>/ping</code> — Measure Telegram API latency",
-        "‣ <code>/shell</code> — Execute shell commands",
-        "‣ <code>/pyexec</code> — Execute Python code",
+        "‣ <code>/shell</code> — Execute approved read-only shell commands",
         "----------------------------------",
         "‣ <code>/dcaction</code> — Manage Docker Compose apps",
         "    ├ <code>/dcaction list</code>",
@@ -86,9 +91,13 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "    ├ <code>/dcaction stop --all</code>",
         "    ├ <code>/dcaction down &lt;dir&gt;</code>",
         "    ├ <code>/dcaction update &lt;dir&gt;</code>",
+        "    ├ <code>/dcaction update --all</code>",
         "    ├ <code>/dcaction logs &lt;dir&gt;</code>",
         "    └ <code>/dcaction restart &lt;dir&gt;</code>",
     ]
+
+    if PYEXEC_ENABLED:
+        lines.insert(8, "‣ <code>/pyexec</code> — Execute Python code")
 
     if POWER_MGMT_AVAILABLE:
         lines.extend(
@@ -121,9 +130,19 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    setup_logging()
+
     if not BOT_TOKEN:
         print("Error: BOT_TOKEN not set.")
         return
+
+    if not PYEXEC_ENABLED:
+        log_security_event(
+            log,
+            "pyexec",
+            "disabled",
+            detail="PYEXEC_ENABLED is false",
+        )
 
     app = (
         ApplicationBuilder()
@@ -145,8 +164,10 @@ def main():
         "powerc": powerc,
         "metrics": metrics,
         "shell": shell,
-        "pyexec": pyexec,
     }
+
+    if PYEXEC_ENABLED:
+        COMMAND_HANDLERS["pyexec"] = pyexec
 
     if POWER_MGMT_AVAILABLE:
         COMMAND_HANDLERS.update(

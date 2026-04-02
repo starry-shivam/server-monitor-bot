@@ -34,24 +34,26 @@ ADDITIONAL_DRIVE_PATHS = [
 ]
 
 # --- Shell Config ---
-SHELL_DENYLIST = {
-    "sudo",
-    "rm",
-    "mv",
-    "shutdown",
-    "reboot",
-    "init",
-    "systemctl",
-    "service",
-    "bash",
-    "zsh",
-    "sh",
-    "source",
-    "pkill",
-    "killall",
+SHELL_ALLOWED_COMMANDS = {
+    "date",
+    "df",
+    "ls",
+    "cat",
+    "fastfetch",
+    "free",
+    "id",
+    "lsblk",
+    "ps",
+    "pwd",
+    "ss",
+    "uname",
+    "uptime",
+    "whoami",
 }
+SHELL_FORBIDDEN_CHARS = {"&", ";", "|", ">", "<", "$", "`", "\\"}
 SHELL_TIMEOUT = int(os.getenv("SHELL_TIMEOUT", "45"))  # seconds
 SHELL_MAX_OUTPUT = int(os.getenv("SHELL_MAX_OUTPUT", "3600"))
+PYEXEC_ENABLED = os.getenv("PYEXEC_ENABLED", "false").lower() == "true"
 
 # --- Docker action config ---
 DC_ALLOWED_ACTIONS = [
@@ -66,7 +68,7 @@ DC_ALLOWED_ACTIONS = [
     "restart",
 ]
 # Actions that support --all flag
-DC_BULK_ACTIONS = ["up", "stop", "pause", "unpause"]
+DC_BULK_ACTIONS = ["up", "stop", "pause", "unpause", "update"]
 DOCKER_APPS_DIR = Path(os.getenv("DOCKER_APPS_DIR", ""))
 # Should be located in docker apps dir, used to perform bulk (--all) actions
 DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
