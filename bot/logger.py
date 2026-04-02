@@ -5,15 +5,31 @@ import logging
 
 def setup_logging() -> None:
     import sys
+    import logging
+    from colorlog import ColoredFormatter
+
+    handler = logging.StreamHandler(sys.stdout)
+
+    formatter = ColoredFormatter(
+        "%(log_color)s%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        log_colors={
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold_red",
+        },
+    )
+
+    handler.setFormatter(formatter)
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=[handler],
         force=True,
     )
 
-    # reduce verbosity of some noisy loggers
+    # reduce verbosity of noisy loggers
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
