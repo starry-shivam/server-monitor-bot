@@ -17,12 +17,16 @@ import subprocess
 from pathlib import Path
 import time
 import hmac
+import logging
 from collections import OrderedDict
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
+from bot.logger import log_callback, log_security_event
 from bot.features import cb_sign
+
+log = logging.getLogger(__name__)
 
 # --- Pre-compiled Regex ---
 RE_PMIC_CURRENT = re.compile(r"(\S+)_A.*?=([\d.]+)A")
@@ -236,6 +240,7 @@ async def powerc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = q.data.split(":")
 
     if len(parts) != 6 or parts[0] != "pwc":
+        log_security_event(log, "powerc_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb, uid, msg_id, verbose, sig = parts
@@ -243,11 +248,18 @@ async def powerc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_id = int(msg_id)
     verbose = bool(int(verbose))
 
-    if q.from_user.id != uid:
+    if not is_authorized_callback_user(getattr(q.from_user, "id", None), uid):
+        log_security_event(
+            log,
+            "powerc_callback",
+            "blocked",
+            detail=f"uid={getattr(q.from_user, 'id', '?')} expected={uid}",
+        )
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, cb_sign(payload)):
+        log_security_event(log, "powerc_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
     if not is_rpi5():
@@ -269,10 +281,14 @@ async def powerc_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         report = format_power_report() if verbose else format_minimal_power_report()
+        log_callback(
+            log, q.from_user, "powerc", cb, "executed", detail=f"verbose={verbose}"
+        )
         await q.edit_message_text(
             report,
             parse_mode="Markdown",
             reply_markup=powerc_keyboard(uid, msg_id, verbose),
         )
     except Exception as e:
+        log_callback(log, q.from_user, "powerc", cb, "failed", detail=str(e))
         await q.edit_message_text(f"❌ Error: `{e}`", parse_mode="Markdown")

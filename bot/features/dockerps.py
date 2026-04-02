@@ -18,6 +18,7 @@ import textwrap
 import datetime
 import time
 import hmac
+import logging
 from io import BytesIO
 from collections import OrderedDict
 
@@ -35,7 +36,10 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from bot.features import cb_sign
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
+from bot.logger import log_callback, log_security_event
+
+log = logging.getLogger(__name__)
 
 # Per-user cooldown for refresh
 DOCKER_REFRESH_COOLDOWN = 10  # seconds
@@ -358,18 +362,26 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = q.data.split(":")
     if len(parts) != 5 or parts[0] != "dps":
+        log_security_event(log, "dockerps_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb_type, uid, msg_id, sig = parts
     uid, msg_id = int(uid), int(msg_id)
 
     # Owner check
-    if user.id != uid:
+    if not is_authorized_callback_user(getattr(user, "id", None), uid):
+        log_security_event(
+            log,
+            "dockerps_callback",
+            "blocked",
+            detail=f"uid={getattr(user, 'id', '?')} expected={uid}",
+        )
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     # Signature check
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, cb_sign(payload)):
+        log_security_event(log, "dockerps_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
     # Enforce rate limit
@@ -397,6 +409,7 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         rows = _collect_docker_containers()
         img = _render_docker_table_image(rows)
+        log_callback(log, user, "dockerps", cb_type, "executed")
 
         await q.edit_message_media(
             InputMediaPhoto(
@@ -406,4 +419,5 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=docker_keyboard(uid, msg_id),
         )
     except Exception as e:
+        log_callback(log, user, "dockerps", cb_type, "failed", detail=str(e))
         await q.edit_message_caption(f"❌ {e}")

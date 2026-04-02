@@ -26,8 +26,9 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from bot.features import cb_sign
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
 from bot.config import CALLBACK_TTL
+from bot.logger import log_callback, log_security_event
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +127,13 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = int(time.time())
 
     # Owner check
-    if user.id != uid:
+    if not is_authorized_callback_user(getattr(user, "id", None), uid):
+        log_security_event(
+            log,
+            "power_callback",
+            "blocked",
+            detail=f"uid={getattr(user, 'id', '?')} expected={uid}",
+        )
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     # TTL check
@@ -136,12 +143,14 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Signature check
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, cb_sign(payload)):
+        log_security_event(log, "power_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature.", show_alert=True)
 
     await q.answer()  # Acknowledge callback to remove loading state
 
     # Cancel
     if phase == "cancel":
+        log_callback(log, user, "power", action, "cancelled")
         task = context.bot_data.pop("shutdown_task", None)
         if task:
             task.cancel()
@@ -152,6 +161,7 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Prevent multiple countdowns
     if context.bot_data.get("shutdown_task"):
+        log_callback(log, user, "power", action, "already_running")
         return await q.edit_message_text("⚠️ Shutdown already in progress.")
 
     meta = POWER_ACTIONS[action]

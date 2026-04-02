@@ -13,15 +13,21 @@
 # SOFTWARE.
 
 import time
+import uuid
 import psutil
+import logging
 from pathlib import Path
 from contextlib import suppress
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.config import LOG_CHANNEL_ID, DC_IGNORE_DIRS, DC_IGNORE_UPDATE_NOTIF_DIRS
 from bot.features.fetch import run_fastfetch
 from bot.features.dcupdate import check_dir_updates, get_system_arch
-from bot.features.dcaction import list_docker_dirs
+from bot.features.dcaction import list_docker_dirs, dc_callback_data
 from telegram.ext import ContextTypes
+from bot.logger import log_job
+
+log = logging.getLogger(__name__)
 
 # --- Alert watchdog data ---
 last_alert = {"temp": 0.0, "ram": 0.0}
@@ -80,7 +86,7 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
-    print("[dcupdate] Checking for container updates...")
+    log_job(log, "dcupdate", "started")
     try:
         system_arch = get_system_arch()
         dirs = list_docker_dirs()
@@ -90,8 +96,11 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
             if app_dir in DC_IGNORE_DIRS:
                 continue
             if app_dir in DC_IGNORE_UPDATE_NOTIF_DIRS:
-                print(
-                    f"[dcupdate] Skipping update check for {app_dir} (notification suppressed)"
+                log_job(
+                    log,
+                    "dcupdate",
+                    "skipped",
+                    detail=f"notification_suppressed:{app_dir}",
                 )
                 continue
 
@@ -100,7 +109,7 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
                 results[app_dir] = updates
 
         if not results:
-            print("[dcupdate] No updates found.")
+            log_job(log, "dcupdate", "completed", detail="no_updates")
             return  # silent when nothing new
 
         # formatting
@@ -116,18 +125,57 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         text += "\n"
 
         # suggest update command
+        keyboard = None
         if len(results) == 1:
             app_name = next(iter(results))
-            text += f"Run <code>/dcaction update {app_name}</code> to update this app."
+            text += f"Click the button below to update <b>{app_name}</b> or run <code>/dcaction update {app_name}</code>."
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔄 Update",
+                            callback_data=dc_callback_data(
+                                "jobup",
+                                0,
+                                int(time.time()),
+                                "update",
+                                app_name,
+                            ),
+                        )
+                    ]
+                ]
+            )
         else:
-            text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
+            text += "Click the button below to update all apps or run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
+            token = uuid.uuid4().hex[:10]
+            context.bot_data[f"dcjob:{token}"] = list(results.keys())
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔄 Update All",
+                            callback_data=dc_callback_data(
+                                "jobupall",
+                                0,
+                                int(time.time()),
+                                "update",
+                                token,
+                            ),
+                        )
+                    ]
+                ]
+            )
 
         await context.bot.send_message(
-            chat_id=LOG_CHANNEL_ID, text=text, parse_mode="HTML"
+            chat_id=LOG_CHANNEL_ID,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
         )
+        log_job(log, "dcupdate", "completed", detail=f"updates_found={len(results)}")
 
     except Exception as e:
-        print("Error in dcupdate job:", e)
+        log_job(log, "dcupdate", "failed", detail=str(e))
         await context.bot.send_message(
             chat_id=LOG_CHANNEL_ID,
             text=f"❌ dcupdate job error:\n<code>{e}</code>",

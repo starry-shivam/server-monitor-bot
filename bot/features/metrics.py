@@ -15,6 +15,7 @@
 from io import BytesIO
 import time
 import hmac
+import logging
 from collections import OrderedDict
 
 import psutil
@@ -32,8 +33,11 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from bot.features import cb_sign
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
+from bot.logger import log_callback, log_security_event
 from bot.config import ADDITIONAL_DRIVE_PATHS
+
+log = logging.getLogger(__name__)
 
 # ================= Refresh Control =================
 
@@ -336,16 +340,24 @@ async def metrics_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = q.data.split(":")
 
     if len(parts) != 5 or parts[0] != "mtr":
+        log_security_event(log, "metrics_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
     _, cb, uid, msg_id, sig = parts
     uid, msg_id = int(uid), int(msg_id)
 
-    if q.from_user.id != uid:
+    if not is_authorized_callback_user(getattr(q.from_user, "id", None), uid):
+        log_security_event(
+            log,
+            "metrics_callback",
+            "blocked",
+            detail=f"uid={getattr(q.from_user, 'id', '?')} expected={uid}",
+        )
         return await q.answer("🚫 Unauthorized", show_alert=True)
 
     payload = ":".join(parts[:-1])
     if not hmac.compare_digest(sig, cb_sign(payload)):
+        log_security_event(log, "metrics_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature", show_alert=True)
 
     now = int(time.time())
@@ -365,6 +377,7 @@ async def metrics_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = _collect_metrics()
     img = await _metrics_render_chart(**data)
+    log_callback(log, q.from_user, "metrics", cb, "executed")
 
     await q.edit_message_media(
         InputMediaPhoto(media=img, caption="📊 System Resource Usage"),

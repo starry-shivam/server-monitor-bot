@@ -12,10 +12,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import html
 import time
 import hmac
 import shutil
 import subprocess
+import logging
 from pathlib import Path
 
 from telegram import (
@@ -26,6 +28,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from bot.features import cb_sign
+from bot.logger import log_callback, log_security_event
 from bot.config import (
     DOCKER_APPS_DIR,
     DC_SCRIPT,
@@ -34,7 +37,9 @@ from bot.config import (
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
 )
-from bot.auth import restricted
+from bot.auth import restricted, is_authorized_callback_user
+
+log = logging.getLogger(__name__)
 
 # ================= Docker Compose Utils =================
 
@@ -155,6 +160,30 @@ def run_bulk_dc(action: str) -> str:
     if action not in DC_BULK_ACTIONS:
         raise ValueError("Unsupported action")
 
+    if action == "update":
+        # Local import avoids module import cycle with dcupdate.py.
+        from bot.features.dcupdate import get_system_arch
+
+        # Compute arch once so has_dir_updates() doesn't redo it per directory.
+        system_arch = get_system_arch()
+        sections: list[str] = []
+        for name in list_docker_dirs():
+            if name in DC_IGNORE_DIRS:
+                continue
+
+            try:
+                if not has_dir_updates(name, system_arch):
+                    sections.append(f"[{name}] Already up to date.")
+                    continue
+
+                output = run_single_dc("update", name)
+                trimmed = tail_log_lines(output, 20).strip() or "No output."
+                sections.append(f"[{name}]\n{trimmed}")
+            except Exception as e:
+                sections.append(f"[{name}] Failed: {e}")
+
+        return "\n\n".join(sections) or "No output."
+
     cmd = ["bash", DC_SCRIPT, action, "--no-color"]
     if DC_IGNORE_DIRS:
         ignore_arg = ",".join(DC_IGNORE_DIRS)
@@ -170,6 +199,34 @@ def run_bulk_dc(action: str) -> str:
 
     output = (proc.stdout or "") + (proc.stderr or "")
     return output.strip() or "No output."
+
+
+def run_docker_cleanup() -> str:
+    proc = subprocess.run(
+        ["docker", "system", "prune", "-a", "-f"],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        check=False,
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return output.strip() or "No output."
+
+
+def tail_log_lines(output: str, lines: int) -> str:
+    if lines <= 0:
+        return ""
+    line_items = output.splitlines()
+    if len(line_items) <= lines:
+        return "\n".join(line_items)
+    return "\n".join(line_items[-lines:])
+
+
+def has_dir_updates(dir_name: str, system_arch: str | None = None) -> bool:
+    # Local import avoids module import cycle with dcupdate.py.
+    from bot.features.dcupdate import has_dir_updates as dcupdate_has_dir_updates
+
+    return dcupdate_has_dir_updates(dir_name, system_arch)
 
 
 # ============== Callback Data ================
@@ -224,6 +281,265 @@ def dc_keyboard(
     )
 
 
+def cleanup_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🧹 Cleanup",
+                    callback_data=dc_callback_data(
+                        "cleanup",
+                        user_id,
+                        int(time.time()),
+                        "prune",
+                        "ALL",
+                    ),
+                )
+            ]
+        ]
+    )
+
+
+def build_action_preview(action: str, target: str | None) -> str:
+    preview = (
+        f"⚠️ <b>Confirm Docker Action</b>\n\n"
+        f"• Action: <code>{action}</code>\n"
+        f"• Target: <code>{target or 'ALL'}</code>\n\n"
+        "Proceed?"
+    )
+    if action == "config":
+        preview += (
+            "\n\n<pre>Note: This may leak sensitive information, such as environment variables "
+            "and secret keys. It is recommended to run this only in private chats and not in groups.</pre>"
+        )
+    return preview
+
+
+def parse_dc_callback(raw_data: str) -> tuple[str, int, int, str, str, str] | None:
+    parts = raw_data.split(":")
+    if len(parts) != 7 or parts[0] != "dc":
+        return None
+
+    _, cb_type, uid, ts, action, target, sig = parts
+    return cb_type, int(uid), int(ts), action, target, sig
+
+
+async def validate_dc_callback(
+    q, parsed_callback: tuple[str, int, int, str, str, str]
+) -> bool:
+    cb_type, uid, ts, action, target, sig = parsed_callback
+    now = int(time.time())
+
+    if not is_authorized_callback_user(
+        getattr(q.from_user, "id", None),
+        uid,
+        allow_any_owner=True,
+    ):
+        log_security_event(
+            log,
+            "dcaction_callback",
+            "blocked",
+            detail=f"uid={getattr(q.from_user, 'id', '?')} expected={uid}",
+        )
+        await q.answer("🚫 Unauthorized", show_alert=True)
+        return False
+
+    if now - ts > CALLBACK_TTL:
+        await q.answer(
+            "⏱ This action has expired. Please run the command again.",
+            show_alert=True,
+        )
+        return False
+
+    payload = ":".join(["dc", cb_type, str(uid), str(ts), action, target])
+    expected_sig = cb_sign(payload)
+
+    if not hmac.compare_digest(sig, expected_sig):
+        log_security_event(log, "dcaction_callback", "invalid_signature")
+        await q.answer(
+            "🚫 Invalid signature. Action aborted.",
+            show_alert=True,
+        )
+        return False
+
+    await q.answer()
+    return True
+
+
+async def handle_job_update_callback(q, uid: int, target: str):
+    await q.edit_message_text(
+        f"🐋 Running update for <code>{target}</code>…",
+        parse_mode="HTML",
+    )
+    try:
+        if not has_dir_updates(target):
+            log_callback(
+                log, q.from_user, "dcaction", "jobup", "up_to_date", detail=target
+            )
+            return await q.edit_message_text(
+                f"✅ <code>{target}</code> is already up to date.",
+                parse_mode="HTML",
+            )
+
+        output = run_single_dc("update", target)
+        log_callback(log, q.from_user, "dcaction", "jobup", "executed", detail=target)
+
+        if len(output) > 3000:
+            output = output[-3000:]
+
+        return await q.edit_message_text(
+            f"📊 <b>Docker Update Logs</b>\n"
+            f"App: <code>{target}</code>\n\n"
+            f"<pre>{html.escape(output)}</pre>",
+            parse_mode="HTML",
+            reply_markup=cleanup_keyboard(uid),
+        )
+    except Exception as e:
+        log_callback(log, q.from_user, "dcaction", "jobup", "failed", detail=str(e))
+        return await q.edit_message_text(
+            f"❌ Update failed for <code>{target}</code>:\n<code>{e}</code>",
+            parse_mode="HTML",
+        )
+
+
+async def handle_job_update_all_callback(
+    q, context: ContextTypes.DEFAULT_TYPE, uid: int, token: str
+):
+    await q.edit_message_text("🐋 Running updates for all apps…", parse_mode="HTML")
+    key = f"dcjob:{token}"
+    targets = context.bot_data.get(key)
+    if not targets:
+        return await q.edit_message_text(
+            "❌ No stored app list found for this message. Please wait for the next update check.",
+            parse_mode="HTML",
+        )
+
+    context.bot_data.pop(key, None)
+
+    total_budget = 50
+    per_app_lines = max(1, total_budget // len(targets))
+    sections: list[str] = []
+
+    for app_name in targets:
+        try:
+            if not has_dir_updates(app_name):
+                log_callback(
+                    log,
+                    q.from_user,
+                    "dcaction",
+                    "jobupall",
+                    "up_to_date",
+                    detail=app_name,
+                )
+                sections.append(
+                    f"<b>{app_name}</b>\n" "<code>Already up to date.</code>"
+                )
+                continue
+
+            raw_output = run_single_dc("update", app_name)
+            log_callback(
+                log, q.from_user, "dcaction", "jobupall", "executed", detail=app_name
+            )
+            short_output = (
+                tail_log_lines(raw_output, per_app_lines).strip() or "No output."
+            )
+            sections.append(f"<b>{app_name}</b>\n" f"<pre>{html.escape(short_output)}</pre>")
+        except Exception as e:
+            log_callback(
+                log,
+                q.from_user,
+                "dcaction",
+                "jobupall",
+                "failed",
+                detail=f"{app_name}: {e}",
+            )
+            sections.append(f"<b>{app_name}</b>\n" f"<code>Update failed: {e}</code>")
+
+    header = (
+        "📊 <b>Docker Update Logs</b>\n"
+        f"Updated apps: <code>{len(targets)}</code>\n"
+        f"Log lines per app: <code>{per_app_lines}</code>\n\n"
+    )
+    max_len = 3900
+    summary_parts: list[str] = [header]
+
+    for section in sections:
+        # Each section is a self-contained HTML fragment; only append
+        # whole sections while staying within the Telegram size limit.
+        candidate = "".join(summary_parts + ([section] if summary_parts[-1].endswith("\n\n") or not summary_parts[-1] else ["\n\n", section]))
+        if len(candidate) > max_len:
+            break
+        if summary_parts[-1].endswith("\n\n") or not summary_parts[-1]:
+            summary_parts.append(section)
+        else:
+            summary_parts.extend(["\n\n", section])
+
+    summary = "".join(summary_parts)
+    return await q.edit_message_text(
+        summary,
+        parse_mode="HTML",
+        reply_markup=cleanup_keyboard(uid),
+    )
+
+
+async def handle_cleanup_callback(q):
+    await q.edit_message_text("🧹 Running Docker cleanup…")
+    try:
+        output = run_docker_cleanup()
+        log_callback(log, q.from_user, "dcaction", "cleanup", "executed")
+        if len(output) > 3000:
+            output = output[-3000:]
+
+        return await q.edit_message_text(
+            f"🧹 <b>Docker Cleanup Logs</b>\n\n<pre>{html.escape(output)}</pre>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log_callback(log, q.from_user, "dcaction", "cleanup", "failed", detail=str(e))
+        return await q.edit_message_text(
+            f"❌ Cleanup failed:\n<code>{e}</code>",
+            parse_mode="HTML",
+        )
+
+
+async def handle_run_callback(q, uid: int, action: str, target: str):
+    await q.edit_message_text("🐋 Executing…")
+
+    try:
+        if action == "update" and target != "ALL":
+            if not has_dir_updates(target):
+                log_callback(
+                    log, q.from_user, "dcaction", action, "up_to_date", detail=target
+                )
+                return await q.edit_message_text(
+                    f"✅ <code>{target}</code> is already up to date.",
+                    parse_mode="HTML",
+                )
+
+        if target == "ALL":
+            output = run_bulk_dc(action)
+        else:
+            output = run_single_dc(action, target)
+        log_callback(log, q.from_user, "dcaction", action, "executed", detail=target)
+
+        if len(output) > 2000:
+            output = output[-2000:]
+
+        reply_markup = cleanup_keyboard(uid) if action == "update" else None
+
+        await q.edit_message_text(
+            f"📊 <b>Execution Summary</b>\n\n<pre>{html.escape(output)}</pre>",
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    except Exception as e:
+        log_callback(log, q.from_user, "dcaction", action, "failed", detail=str(e))
+        await q.edit_message_text(
+            f"❌ Error:\n<code>{e}</code>",
+            parse_mode="HTML",
+        )
+
+
 # ================= Handlers =================
 
 
@@ -242,6 +558,7 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction stop --all</code>\n"
         "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction update --all</code>\n"
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
         "\n\n"
@@ -346,90 +663,48 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
             )
 
+        if action == "update":
+            if not has_dir_updates(target):
+                return await update.message.reply_text(
+                    f"✅ <code>{target}</code> is already up to date.",
+                    parse_mode="HTML",
+                )
+
     user_id = update.effective_user.id
     ts = int(time.time())
 
-    preview = (
-        f"⚠️ <b>Confirm Docker Action</b>\n\n"
-        f"• Action: <code>{action}</code>\n"
-        f"• Target: <code>{target or 'ALL'}</code>\n\n"
-        "Proceed?"
-    )
-    # Config prints compose file with environment variables etc resolved
-    # so show a warning about potential sensitive info leakage
-    if action == "config":
-        preview += (
-            "\n\n<pre>Note: This may leak sensitive information, such as environment variables "
-            "and secret keys. It is recommended to run this only in private chats and not in groups.</pre>"
-        )
-
-    keyboard = dc_keyboard(user_id, ts, action, target)
-
     await update.message.reply_text(
-        preview,
+        build_action_preview(action, target),
         parse_mode="HTML",
-        reply_markup=keyboard,
+        reply_markup=dc_keyboard(user_id, ts, action, target),
     )
 
 
 async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    user = q.from_user
-
-    parts = q.data.split(":")
-    if len(parts) != 7 or parts[0] != "dc":
+    parsed = parse_dc_callback(q.data)
+    if parsed is None:
+        log_security_event(log, "dcaction_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
-    _, cb_type, uid, ts, action, target, sig = parts
-
-    uid = int(uid)
-    ts = int(ts)
-    now = int(time.time())
-
-    # Owner check
-    if user.id != uid:
-        return await q.answer("🚫 Unauthorized", show_alert=True)
-
-    # Expiry check
-    if now - ts > CALLBACK_TTL:
-        return await q.answer(
-            "⏱ This action has expired. Please run the command again.",
-            show_alert=True,
-        )
-
-    # Signature check
-    payload = ":".join(parts[:-1])
-    expected_sig = cb_sign(payload)
-
-    if not hmac.compare_digest(sig, expected_sig):
-        return await q.answer(
-            "🚫 Invalid signature. Action aborted.",
-            show_alert=True,
-        )
-
-    await q.answer()  # acknowledge callback
+    cb_type, uid, _ts, action, target, _sig = parsed
+    if not await validate_dc_callback(q, parsed):
+        return
 
     if cb_type == "cancel":
+        log_callback(log, q.from_user, "dcaction", "cancel", "cancelled", detail=target)
         return await q.edit_message_text("❌ Cancelled.")
 
-    await q.edit_message_text("🐋 Executing…")
+    if cb_type == "jobup":
+        return await handle_job_update_callback(q, uid, target)
 
-    try:
-        if target == "ALL":
-            output = run_bulk_dc(action)
-        else:
-            output = run_single_dc(action, target)
+    if cb_type == "jobupall":
+        return await handle_job_update_all_callback(q, context, uid, target)
 
-        if len(output) > 2000:
-            output = output[-2000:]
+    if cb_type == "cleanup":
+        return await handle_cleanup_callback(q)
 
-        await q.edit_message_text(
-            f"📊 <b>Execution Summary</b>\n\n<pre>{output}</pre>",
-            parse_mode="HTML",
-        )
+    if cb_type != "run":
+        return await q.answer("🚫 Invalid callback type", show_alert=True)
 
-    except Exception as e:
-        await q.edit_message_text(
-            f"❌ Error:\n<code>{e}</code>",
-            parse_mode="HTML",
-        )
+    await handle_run_callback(q, uid, action, target)
