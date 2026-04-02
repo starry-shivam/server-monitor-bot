@@ -161,15 +161,17 @@ def run_bulk_dc(action: str) -> str:
 
     if action == "update":
         # Local import avoids module import cycle with dcupdate.py.
-        from bot.features.dcupdate import has_dir_updates
+        from bot.features.dcupdate import get_system_arch, has_dir_updates
 
+        # Compute arch once so has_dir_updates() doesn't redo it per directory.
+        system_arch = get_system_arch()
         sections: list[str] = []
         for name in list_docker_dirs():
             if name in DC_IGNORE_DIRS:
                 continue
 
             try:
-                if not has_dir_updates(name):
+                if not has_dir_updates(name, system_arch):
                     sections.append(f"[{name}] Already up to date.")
                     continue
 

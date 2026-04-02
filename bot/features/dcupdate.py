@@ -137,9 +137,14 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     return updates_found
 
 
-def has_dir_updates(dir_name: str) -> bool:
-    """Helper for checking if a specific app directory has updates."""
-    return bool(check_dir_updates(dir_name, get_system_arch()))
+def has_dir_updates(dir_name: str, system_arch: str | None = None) -> bool:
+    """Helper for checking if a specific app directory has updates.
+
+    Pass *system_arch* to reuse a previously computed architecture string
+    and avoid redundant ``get_system_arch()`` calls in bulk flows.
+    """
+    arch = system_arch if system_arch is not None else get_system_arch()
+    return bool(check_dir_updates(dir_name, arch))
 
 
 # ================= Manual Command Handler =================
