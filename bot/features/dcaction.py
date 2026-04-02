@@ -12,6 +12,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import html
 import time
 import hmac
 import shutil
@@ -161,7 +162,7 @@ def run_bulk_dc(action: str) -> str:
 
     if action == "update":
         # Local import avoids module import cycle with dcupdate.py.
-        from bot.features.dcupdate import get_system_arch, has_dir_updates
+        from bot.features.dcupdate import get_system_arch
 
         # Compute arch once so has_dir_updates() doesn't redo it per directory.
         system_arch = get_system_arch()
@@ -221,11 +222,11 @@ def tail_log_lines(output: str, lines: int) -> str:
     return "\n".join(line_items[-lines:])
 
 
-def has_dir_updates(dir_name: str) -> bool:
+def has_dir_updates(dir_name: str, system_arch: str | None = None) -> bool:
     # Local import avoids module import cycle with dcupdate.py.
     from bot.features.dcupdate import has_dir_updates as dcupdate_has_dir_updates
 
-    return dcupdate_has_dir_updates(dir_name)
+    return dcupdate_has_dir_updates(dir_name, system_arch)
 
 
 # ============== Callback Data ================
@@ -389,7 +390,7 @@ async def handle_job_update_callback(q, uid: int, target: str):
         return await q.edit_message_text(
             f"📊 <b>Docker Update Logs</b>\n"
             f"App: <code>{target}</code>\n\n"
-            f"<pre>{output}</pre>",
+            f"<pre>{html.escape(output)}</pre>",
             parse_mode="HTML",
             reply_markup=cleanup_keyboard(uid),
         )
@@ -442,7 +443,7 @@ async def handle_job_update_all_callback(
             short_output = (
                 tail_log_lines(raw_output, per_app_lines).strip() or "No output."
             )
-            sections.append(f"<b>{app_name}</b>\n" f"<pre>{short_output}</pre>")
+            sections.append(f"<b>{app_name}</b>\n" f"<pre>{html.escape(short_output)}</pre>")
         except Exception as e:
             log_callback(
                 log,
@@ -490,7 +491,7 @@ async def handle_cleanup_callback(q):
             output = output[-3000:]
 
         return await q.edit_message_text(
-            f"🧹 <b>Docker Cleanup Logs</b>\n\n<pre>{output}</pre>",
+            f"🧹 <b>Docker Cleanup Logs</b>\n\n<pre>{html.escape(output)}</pre>",
             parse_mode="HTML",
         )
     except Exception as e:
@@ -527,7 +528,7 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
         reply_markup = cleanup_keyboard(uid) if action == "update" else None
 
         await q.edit_message_text(
-            f"📊 <b>Execution Summary</b>\n\n<pre>{output}</pre>",
+            f"📊 <b>Execution Summary</b>\n\n<pre>{html.escape(output)}</pre>",
             parse_mode="HTML",
             reply_markup=reply_markup,
         )
