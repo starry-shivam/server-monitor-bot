@@ -452,15 +452,26 @@ async def handle_job_update_all_callback(
             )
             sections.append(f"<b>{app_name}</b>\n" f"<code>Update failed: {e}</code>")
 
-    summary = (
+    header = (
         "📊 <b>Docker Update Logs</b>\n"
         f"Updated apps: <code>{len(targets)}</code>\n"
-        f"Log lines per app: <code>{per_app_lines}</code>\n\n" + "\n\n".join(sections)
+        f"Log lines per app: <code>{per_app_lines}</code>\n\n"
     )
+    max_len = 3900
+    summary_parts: list[str] = [header]
 
-    if len(summary) > 3900:
-        summary = summary[-3900:]
+    for section in sections:
+        # Each section is a self-contained HTML fragment; only append
+        # whole sections while staying within the Telegram size limit.
+        candidate = "".join(summary_parts + ([section] if summary_parts[-1].endswith("\n\n") or not summary_parts[-1] else ["\n\n", section]))
+        if len(candidate) > max_len:
+            break
+        if summary_parts[-1].endswith("\n\n") or not summary_parts[-1]:
+            summary_parts.append(section)
+        else:
+            summary_parts.extend(["\n\n", section])
 
+    summary = "".join(summary_parts)
     return await q.edit_message_text(
         summary,
         parse_mode="HTML",
