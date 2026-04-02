@@ -4,10 +4,18 @@ import logging
 
 
 def setup_logging() -> None:
+    import sys
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
     )
+
+    # reduce verbosity of some noisy loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 def _user_label(user) -> str:

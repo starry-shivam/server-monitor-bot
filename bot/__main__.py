@@ -222,7 +222,7 @@ def main():
             job_kwargs={"misfire_grace_time": 10},
         )
 
-    print("🤖 Bot is running…")
+    log.info("🤖 Bot is running…")
     app.run_polling()
 
 
