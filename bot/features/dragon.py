@@ -101,6 +101,56 @@ def human_bytes(v):
 
 
 # =====================================================
+# Uptime / RAM / Governor
+# =====================================================
+
+
+def get_uptime():
+    try:
+        secs = float(Path("/proc/uptime").read_text().split()[0])
+
+        days = int(secs // 86400)
+        hours = int((secs % 86400) // 3600)
+        mins = int((secs % 3600) // 60)
+
+        if days > 0:
+            return f"{days}d {hours}h"
+        elif hours > 0:
+            return f"{hours}h {mins}m"
+        return f"{mins}m"
+
+    except Exception:
+        return "Unknown"
+
+
+def get_governor():
+    for cpu in Path("/sys/devices/system/cpu").glob("cpu[0-9]*"):
+        gov = read_text(cpu / "cpufreq/scaling_governor")
+        if gov:
+            return gov
+    return "Unknown"
+
+
+def get_ram():
+    try:
+        info = {}
+
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            k, v = line.split(":", 1)
+            info[k] = int(v.strip().split()[0])
+
+        total = info["MemTotal"] * 1024
+        avail = info["MemAvailable"] * 1024
+        used = total - avail
+        pct = used / total * 100
+
+        return human_bytes(used), human_bytes(total), pct
+
+    except Exception:
+        return ("?", "?", 0)
+
+
+# =====================================================
 # Thermal
 # =====================================================
 
@@ -112,6 +162,7 @@ def thermal_zones():
         try:
             name = read_text(z / "type")
             temp = read_int(z / "temp")
+
             if name and temp is not None:
                 rows.append((name, temp / 1000.0))
         except Exception:
@@ -160,16 +211,14 @@ def thermal_state():
         return "🟠 Warm"
     elif t >= 65:
         return "🟡 Elevated"
-    else:
-        return "🟢 Normal"
+    return "🟢 Normal"
 
 
 # =====================================================
 # CPU Clocks
-# QCS6490:
-# cpu0-3  Efficiency
-# cpu4-6  Performance
-# cpu7    Prime
+# cpu0-3 Efficiency
+# cpu4-6 Performance
+# cpu7   Prime
 # =====================================================
 
 
@@ -286,7 +335,7 @@ def pcie_devices():
 
         if "realtek" in low:
             lines.append("Realtek Gigabit Ethernet")
-        elif "non-volatile memory" in low or "nvme" in low:
+        elif "nvme" in low or "non-volatile memory" in low:
             lines.append("KingSpec NVMe SSD")
         else:
             lines.append(row.split(": ", 1)[-1])
@@ -301,8 +350,7 @@ def pcie_devices():
 
 def mount_usage(path):
     try:
-        total, used, free = shutil.disk_usage(path)
-        return total, used, free
+        return shutil.disk_usage(path)
     except Exception:
         return None
 
@@ -312,15 +360,15 @@ def storage_lines():
 
     root = mount_usage("/")
     if root:
-        t, u, f = root
-        lines.append(f"Root: {human_bytes(f)} free / {human_bytes(t)}")
+        total, used, free = root
+        lines.append(f"Root: {human_bytes(free)} free / {human_bytes(total)}")
 
     ssd_path = "/home/starry/ssd"
     if Path(ssd_path).exists():
         ssd = mount_usage(ssd_path)
         if ssd:
-            t, u, f = ssd
-            lines.append(f"NVMe: {human_bytes(f)} free / {human_bytes(t)}")
+            total, used, free = ssd
+            lines.append(f"NVMe: {human_bytes(free)} free / {human_bytes(total)}")
 
     return lines
 
@@ -339,15 +387,16 @@ def format_compact():
 
     load_state_txt, l1, _, _, cores = load_info()
 
-    lines = [
-        "🐉 *Dragon Q6A*",
-        f"🌡 CPU: `{avg:.1f}°C` (max `{mx:.1f}°C`)",
-        f"⚙ Prime: `{ghz(pcur):.2f}/{ghz(pmax):.2f} GHz`",
-        f"🔥 Thermal: {thermal_state()}",
-        f"📈 Load: {load_state_txt} (`{l1:.2f}` / `{cores} cores`)",
-    ]
-
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            "🐉 *Dragon Q6A*",
+            f"🌡 CPU: `{avg:.1f}°C` (max `{mx:.1f}°C`)",
+            f"⚙ Prime: `{ghz(pcur):.2f}/{ghz(pmax):.2f} GHz`",
+            f"🔥 Thermal: {thermal_state()}",
+            f"📈 Load: {load_state_txt} (`{l1:.2f}` / `{cores} cores`)",
+            f"⏱ Uptime: `{get_uptime()}`",
+        ]
+    )
 
 
 def format_verbose():
@@ -358,6 +407,10 @@ def format_verbose():
     ddr = named_temp("ddr")
     skin = named_temp("msm-skin")
     nvme_temp = named_temp("nvme")
+
+    gov = get_governor()
+    up = get_uptime()
+    ram_used, ram_total, ram_pct = get_ram()
 
     freq = cluster_freqs()
     ecur, emax = freq["efficiency"]
@@ -384,6 +437,10 @@ def format_verbose():
 
     lines.extend(
         [
+            "",
+            f"⚙ Governor: `{gov}`",
+            f"⏱ Uptime: `{up}`",
+            f"🧠 RAM: `{ram_used}/{ram_total}` (`{ram_pct:.0f}%`)",
             "",
             "*CPU Frequencies:*",
             f"`Efficiency   {ghz(ecur):.2f}/{ghz(emax):.2f} GHz`",
@@ -450,7 +507,7 @@ def dragon_keyboard(user_id, msg_id, verbose):
 
 
 # =====================================================
-# Main Command
+# Command
 # =====================================================
 
 
@@ -486,7 +543,7 @@ async def dragon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =====================================================
-# Callback Handler
+# Callback
 # =====================================================
 
 
