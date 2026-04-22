@@ -443,7 +443,9 @@ async def handle_job_update_all_callback(
             short_output = (
                 tail_log_lines(raw_output, per_app_lines).strip() or "No output."
             )
-            sections.append(f"<b>{app_name}</b>\n" f"<pre>{html.escape(short_output)}</pre>")
+            sections.append(
+                f"<b>{app_name}</b>\n" f"<pre>{html.escape(short_output)}</pre>"
+            )
         except Exception as e:
             log_callback(
                 log,
@@ -466,7 +468,14 @@ async def handle_job_update_all_callback(
     for section in sections:
         # Each section is a self-contained HTML fragment; only append
         # whole sections while staying within the Telegram size limit.
-        candidate = "".join(summary_parts + ([section] if summary_parts[-1].endswith("\n\n") or not summary_parts[-1] else ["\n\n", section]))
+        candidate = "".join(
+            summary_parts
+            + (
+                [section]
+                if summary_parts[-1].endswith("\n\n") or not summary_parts[-1]
+                else ["\n\n", section]
+            )
+        )
         if len(candidate) > max_len:
             break
         if summary_parts[-1].endswith("\n\n") or not summary_parts[-1]:

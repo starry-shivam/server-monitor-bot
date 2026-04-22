@@ -46,7 +46,7 @@ from bot.features.fetch import fetch, fetch_callback
 from bot.features.dockerps import dockerps, dockerps_callback
 from bot.features.dcaction import dcaction, dcaction_callback
 from bot.features.dcupdate import dcupdate
-from bot.features.powerc import powerc, powerc_callback
+from bot.features.dragon import dragon, dragon_callback
 from bot.features.powerm import reboot, poweroff, power_callback
 from bot.features.metrics import metrics, metrics_callback
 from bot.features.shell import shell, shell_callback
@@ -74,7 +74,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "‣ <code>/fetch</code> — Display system information using Fastfetch",
         "‣ <code>/dockerps</code> — Show Docker containers",
         "‣ <code>/dcupdate</code> — Check for Docker container updates",
-        "‣ <code>/powerc</code> — Display Pi 5 power usage",
+        "‣ <code>/dragon</code> — Get Dragon Q6A hardware report",
         "‣ <code>/metrics</code> — Visual CPU, RAM, disk usage",
         "‣ <code>/ping</code> — Measure Telegram API latency",
         "‣ <code>/shell</code> — Execute approved read-only shell commands",
@@ -160,7 +160,7 @@ def main():
         "dockerps": dockerps,
         "dcaction": dcaction,
         "dcupdate": dcupdate,
-        "powerc": powerc,
+        "dragon": dragon,
         "metrics": metrics,
         "shell": shell,
     }
@@ -184,7 +184,7 @@ def main():
         r"^ffc:": fetch_callback,
         r"^dps:": dockerps_callback,
         r"^dc:": dcaction_callback,
-        r"^pwc:": powerc_callback,
+        r"^pwc:": dragon_callback,
         r"^mtr:": metrics_callback,
         r"^sh:": shell_callback,
     }
