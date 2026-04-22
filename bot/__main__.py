@@ -184,7 +184,7 @@ def main():
         r"^ffc:": fetch_callback,
         r"^dps:": dockerps_callback,
         r"^dc:": dcaction_callback,
-        r"^pwc:": dragon_callback,
+        r"^drg:": dragon_callback,
         r"^mtr:": metrics_callback,
         r"^sh:": shell_callback,
     }
