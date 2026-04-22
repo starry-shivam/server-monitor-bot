@@ -56,6 +56,15 @@ def has_compose_file(dir_path: Path) -> bool:
     return any((dir_path / f).exists() for f in COMPOSE_FILES)
 
 
+def is_locally_built(target: str | Path) -> bool:
+    dir_path = target if isinstance(target, Path) else DOCKER_APPS_DIR / target
+    if not dir_path.exists() or not has_compose_file(dir_path):
+        return False
+    return any(
+        (dir_path / f).exists() for f in ["Dockerfile", "docker-compose.build.yml"]
+    )
+
+
 def list_docker_dirs() -> list[str]:
     if not DOCKER_APPS_DIR.exists():
         return []
@@ -131,10 +140,7 @@ def run_single_dc(action: str, name: str) -> str:
         commands_to_run = [["down"], ["up", "-d", "--no-build"]]
 
     elif action == "update":
-        # Check if local build files exist
-        build_locally = any(
-            (dir_path / f).exists() for f in ["Dockerfile", "docker-compose.build.yml"]
-        )
+        build_locally = is_locally_built(dir_path)
         first_step = ["build"] if build_locally else ["pull"]
         commands_to_run = [first_step, ["down"], ["up", "-d", "--no-build"]]
 
@@ -172,7 +178,9 @@ def run_bulk_dc(action: str) -> str:
                 continue
 
             try:
-                if not has_dir_updates(name, system_arch):
+                if not is_locally_built(name) and not has_dir_updates(
+                    name, system_arch
+                ):
                     sections.append(f"[{name}] Already up to date.")
                     continue
 
@@ -372,7 +380,7 @@ async def handle_job_update_callback(q, uid: int, target: str):
         parse_mode="HTML",
     )
     try:
-        if not has_dir_updates(target):
+        if not is_locally_built(target) and not has_dir_updates(target):
             log_callback(
                 log, q.from_user, "dcaction", "jobup", "up_to_date", detail=target
             )
@@ -422,7 +430,7 @@ async def handle_job_update_all_callback(
 
     for app_name in targets:
         try:
-            if not has_dir_updates(app_name):
+            if not is_locally_built(app_name) and not has_dir_updates(app_name):
                 log_callback(
                     log,
                     q.from_user,
@@ -516,7 +524,7 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
 
     try:
         if action == "update" and target != "ALL":
-            if not has_dir_updates(target):
+            if not is_locally_built(target) and not has_dir_updates(target):
                 log_callback(
                     log, q.from_user, "dcaction", action, "up_to_date", detail=target
                 )
@@ -673,7 +681,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         if action == "update":
-            if not has_dir_updates(target):
+            if not is_locally_built(target) and not has_dir_updates(target):
                 return await update.message.reply_text(
                     f"✅ <code>{target}</code> is already up to date.",
                     parse_mode="HTML",
