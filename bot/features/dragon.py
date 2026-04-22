@@ -389,7 +389,7 @@ def format_compact():
 
     return "\n".join(
         [
-            "🐉 *Dragon Q6A*",
+            "🐉 *Dragon Q6A*\n",
             f"🌡 CPU: `{avg:.1f}°C` (max `{mx:.1f}°C`)",
             f"⚙ Prime: `{ghz(pcur):.2f}/{ghz(pmax):.2f} GHz`",
             f"🔥 Thermal: {thermal_state()}",
