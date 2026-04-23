@@ -42,7 +42,7 @@ def _get_uptime() -> float:
 
 async def notify_boot_job(context: ContextTypes.DEFAULT_TYPE):
     server_uptime = _get_uptime()
-    reason = "server reboot" if server_uptime < 30 else "manual restart"
+    reason = "server reboot" if server_uptime < 60 else "manual restart"
     await context.bot.send_message(
         chat_id=LOG_CHANNEL_ID,
         text=f"✅ Bot started (reason: {reason})",
