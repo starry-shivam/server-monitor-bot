@@ -5,10 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/starry/bots/server-monitor-bot
-ExecStart=/home/starry/bots/server-monitor-bot/venv/bin/python -m bot
+WorkingDirectory=/home/starry/ssd/bots/server-monitor-bot
+ExecStart=/home/starry/ssd/bots/server-monitor-bot/venv/bin/python -m bot
 Restart=always
 RestartSec=5
+
+#ENV
+Environment=MPLCONFIGDIR=/tmp/mpl-cache
 
 # Security hardening
 User=starry
