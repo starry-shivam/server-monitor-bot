@@ -224,7 +224,7 @@ def run_docker_cleanup() -> str:
 def run_docker_prune_preserve_build_cache() -> str:
     commands = [
         ["docker", "container", "prune", "-f"],
-        ["docker", "image", "prune", "-f"],
+        ["docker", "image", "prune", "-a", "-f"],
         ["docker", "network", "prune", "-f"],
     ]
     outputs: list[str] = []
