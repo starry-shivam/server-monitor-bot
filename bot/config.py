@@ -64,6 +64,7 @@ DC_ALLOWED_ACTIONS = [
     "stop",
     "down",
     "update",
+    "prune",
     "logs",
     "restart",
 ]

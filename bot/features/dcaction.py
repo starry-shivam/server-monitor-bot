@@ -221,6 +221,32 @@ def run_docker_cleanup() -> str:
     return output.strip() or "No output."
 
 
+def run_docker_prune_preserve_build_cache() -> str:
+    commands = [
+        ["docker", "container", "prune", "-f"],
+        ["docker", "image", "prune", "-f"],
+        ["docker", "network", "prune", "-f"],
+    ]
+    outputs: list[str] = []
+
+    for cmd in commands:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            check=False,
+        )
+        output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        outputs.append(
+            f"$ {' '.join(cmd)}\n{output}" if output else f"$ {' '.join(cmd)}"
+        )
+        if proc.returncode != 0:
+            break
+
+    return "\n\n".join(outputs).strip() or "No output."
+
+
 def tail_log_lines(output: str, lines: int) -> str:
     if lines <= 0:
         return ""
@@ -294,7 +320,19 @@ def cleanup_keyboard(user_id: int) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "🧹 Cleanup",
+                    "🧹 Full Cleanup",
+                    callback_data=dc_callback_data(
+                        "cleanup",
+                        user_id,
+                        int(time.time()),
+                        "system",
+                        "ALL",
+                    ),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🧽 Prune (Keep Cache)",
                     callback_data=dc_callback_data(
                         "cleanup",
                         user_id,
@@ -303,7 +341,7 @@ def cleanup_keyboard(user_id: int) -> InlineKeyboardMarkup:
                         "ALL",
                     ),
                 )
-            ]
+            ],
         ]
     )
 
@@ -499,20 +537,35 @@ async def handle_job_update_all_callback(
     )
 
 
-async def handle_cleanup_callback(q):
-    await q.edit_message_text("🧹 Running Docker cleanup…")
+async def handle_cleanup_callback(q, cleanup_action: str):
+    if cleanup_action == "prune":
+        await q.edit_message_text("🧽 Running Docker prune (preserve build cache)…")
+    else:
+        await q.edit_message_text("🧹 Running Docker full cleanup…")
+
     try:
-        output = run_docker_cleanup()
-        log_callback(log, q.from_user, "dcaction", "cleanup", "executed")
+        if cleanup_action == "prune":
+            output = run_docker_prune_preserve_build_cache()
+            title = "🧽 <b>Docker Prune Logs (Build Cache Preserved)</b>"
+            event_action = "cleanup_prune"
+        else:
+            output = run_docker_cleanup()
+            title = "🧹 <b>Docker Cleanup Logs (Full)</b>"
+            event_action = "cleanup_full"
+
+        log_callback(log, q.from_user, "dcaction", event_action, "executed")
         if len(output) > 3000:
             output = output[-3000:]
 
         return await q.edit_message_text(
-            f"🧹 <b>Docker Cleanup Logs</b>\n\n<pre>{html.escape(output)}</pre>",
+            f"{title}\n\n<pre>{html.escape(output)}</pre>",
             parse_mode="HTML",
         )
     except Exception as e:
-        log_callback(log, q.from_user, "dcaction", "cleanup", "failed", detail=str(e))
+        event_action = "cleanup_prune" if cleanup_action == "prune" else "cleanup_full"
+        log_callback(
+            log, q.from_user, "dcaction", event_action, "failed", detail=str(e)
+        )
         return await q.edit_message_text(
             f"❌ Cleanup failed:\n<code>{e}</code>",
             parse_mode="HTML",
@@ -523,6 +576,19 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
     await q.edit_message_text("🐋 Executing…")
 
     try:
+        if action == "prune":
+            output = run_docker_prune_preserve_build_cache()
+            log_callback(log, q.from_user, "dcaction", action, "executed", detail="ALL")
+
+            if len(output) > 2000:
+                output = output[-2000:]
+
+            return await q.edit_message_text(
+                "📊 <b>Docker Prune Summary (Build Cache Preserved)</b>\n\n"
+                f"<pre>{html.escape(output)}</pre>",
+                parse_mode="HTML",
+            )
+
         if action == "update" and target != "ALL":
             if not is_locally_built(target) and not has_dir_updates(target):
                 log_callback(
@@ -576,6 +642,7 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction update --all</code>\n"
+        "‣ <code>/dcaction prune</code>\n"
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
         "\n\n"
@@ -637,6 +704,21 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # validate if --all is supported for this action
     is_all = "--all" in args
+
+    if action == "prune":
+        if is_all or len(args) > 1:
+            return await update.message.reply_text(
+                "❌ Use <code>/dcaction prune</code> without extra arguments.",
+                parse_mode="HTML",
+            )
+
+        user_id = update.effective_user.id
+        ts = int(time.time())
+        return await update.message.reply_text(
+            build_action_preview(action, "ALL"),
+            parse_mode="HTML",
+            reply_markup=dc_keyboard(user_id, ts, action, "ALL"),
+        )
 
     if is_all and action not in DC_BULK_ACTIONS:
         return await update.message.reply_text(
@@ -719,7 +801,7 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await handle_job_update_all_callback(q, context, uid, target)
 
     if cb_type == "cleanup":
-        return await handle_cleanup_callback(q)
+        return await handle_cleanup_callback(q, action)
 
     if cb_type != "run":
         return await q.answer("🚫 Invalid callback type", show_alert=True)
