@@ -78,7 +78,7 @@ def run_fastfetch(include_ip: bool = False) -> str:
             pass
 
     final_structure = ":".join(structure_parts)
-    command = ["fastfetch", "--logo", "none", "-s", final_structure]
+    command = ["fastfetch", "--logo", "none", "--config", "none", "-s", final_structure]
 
     try:
         proc = subprocess.run(command, capture_output=True, text=True, check=True)

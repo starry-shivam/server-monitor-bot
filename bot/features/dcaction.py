@@ -589,6 +589,19 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
                 parse_mode="HTML",
             )
 
+        if action == "prune_full":
+            output = run_docker_cleanup()
+            log_callback(log, q.from_user, "dcaction", action, "executed", detail="ALL")
+
+            if len(output) > 2000:
+                output = output[-2000:]
+
+            return await q.edit_message_text(
+                "📊 <b>Docker Prune Summary (Full)</b>\n\n"
+                f"<pre>{html.escape(output)}</pre>",
+                parse_mode="HTML",
+            )
+
         if action == "update" and target != "ALL":
             if not is_locally_built(target) and not has_dir_updates(target):
                 log_callback(
@@ -643,6 +656,7 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction update &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction update --all</code>\n"
         "‣ <code>/dcaction prune</code>\n"
+        "‣ <code>/dcaction prune --full</code>\n"
         "‣ <code>/dcaction logs &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction restart &lt;dir&gt;</code>"
         "\n\n"
@@ -706,18 +720,20 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_all = "--all" in args
 
     if action == "prune":
-        if is_all or len(args) > 1:
+        is_full = "--full" in args
+        if is_all or (len(args) > 1 and not is_full) or (is_full and len(args) > 2):
             return await update.message.reply_text(
-                "❌ Use <code>/dcaction prune</code> without extra arguments.",
+                "❌ Use <code>/dcaction prune</code> or <code>/dcaction prune --full</code>.",
                 parse_mode="HTML",
             )
 
+        prune_action = "prune_full" if is_full else "prune"
         user_id = update.effective_user.id
         ts = int(time.time())
         return await update.message.reply_text(
-            build_action_preview(action, "ALL"),
+            build_action_preview(prune_action, "ALL"),
             parse_mode="HTML",
-            reply_markup=dc_keyboard(user_id, ts, action, "ALL"),
+            reply_markup=dc_keyboard(user_id, ts, prune_action, "ALL"),
         )
 
     if is_all and action not in DC_BULK_ACTIONS:
