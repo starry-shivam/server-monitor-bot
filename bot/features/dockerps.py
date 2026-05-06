@@ -33,7 +33,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.features import cb_sign
 from bot.auth import restricted, is_authorized_callback_user
@@ -421,3 +421,16 @@ async def dockerps_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log_callback(log, user, "dockerps", cb_type, "failed", detail=str(e))
         await q.edit_message_caption(f"❌ {e}")
+
+
+def get_help_section() -> str:
+    return "‣ <code>/dockerps</code> — Show Docker containers"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("dockerps", "Show Docker containers")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("dockerps", dockerps))
+    app.add_handler(CallbackQueryHandler(dockerps_callback, pattern=r"^dps:"))

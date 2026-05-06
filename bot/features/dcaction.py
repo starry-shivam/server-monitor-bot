@@ -25,7 +25,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.features import cb_sign
 from bot.logger import log_callback, log_security_event
@@ -823,3 +823,32 @@ async def dcaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await q.answer("🚫 Invalid callback type", show_alert=True)
 
     await handle_run_callback(q, uid, action, target)
+
+
+def get_help_section() -> str:
+    return (
+        "‣ <code>/dcaction</code> — Manage Docker Compose apps\n"
+        "    ├ <code>/dcaction list</code>\n"
+        "    ├ <code>/dcaction config &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction pull &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction build &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction up &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction up --all</code>\n"
+        "    ├ <code>/dcaction stop &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction stop --all</code>\n"
+        "    ├ <code>/dcaction down &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction update &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction update --all</code>\n"
+        "    ├ <code>/dcaction prune</code>\n"
+        "    ├ <code>/dcaction logs &lt;dir&gt;</code>\n"
+        "    └ <code>/dcaction restart &lt;dir&gt;</code>"
+    )
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("dcaction", "Manage Docker Compose applications")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("dcaction", dcaction))
+    app.add_handler(CallbackQueryHandler(dcaction_callback, pattern=r"^dc:"))

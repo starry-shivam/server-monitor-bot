@@ -20,10 +20,11 @@ from html import escape
 from typing import Any, Callable
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
 from bot.logger import log_callback
+from bot.config import PYEXEC_ENABLED
 
 log = logging.getLogger(__name__)
 
@@ -81,3 +82,22 @@ async def pyexec(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         log_callback(log, update.effective_user, "pyexec", "run", "completed_inline")
         await msg.edit_text(text, parse_mode="HTML")
+
+
+def get_help_section() -> str | None:
+    if not PYEXEC_ENABLED:
+        return None
+    return "‣ <code>/pyexec</code> — Execute Python code"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    if not PYEXEC_ENABLED:
+        return []
+    return [("pyexec", "Execute Python code")]
+
+
+def register_handlers(app):
+    if not PYEXEC_ENABLED:
+        return
+
+    app.add_handler(CommandHandler("pyexec", pyexec))

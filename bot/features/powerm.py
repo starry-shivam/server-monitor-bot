@@ -23,11 +23,11 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.features import cb_sign
 from bot.auth import restricted, is_authorized_callback_user
-from bot.config import CALLBACK_TTL
+from bot.config import CALLBACK_TTL, POWER_MGMT_AVAILABLE
 from bot.logger import log_callback, log_security_event
 
 log = logging.getLogger(__name__)
@@ -210,3 +210,30 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     task = asyncio.create_task(countdown())
     context.bot_data["shutdown_task"] = task
+
+
+def get_help_section() -> str | None:
+    if not POWER_MGMT_AVAILABLE:
+        return None
+    return (
+        "‣ <code>/reboot</code> — Reboot the server\n"
+        "‣ <code>/poweroff</code> — Power off the server"
+    )
+
+
+def get_commands() -> list[tuple[str, str]]:
+    if not POWER_MGMT_AVAILABLE:
+        return []
+    return [
+        ("reboot", "Reboot the server"),
+        ("poweroff", "Power off the server"),
+    ]
+
+
+def register_handlers(app):
+    if not POWER_MGMT_AVAILABLE:
+        return
+
+    app.add_handler(CommandHandler("reboot", reboot))
+    app.add_handler(CommandHandler("poweroff", poweroff))
+    app.add_handler(CallbackQueryHandler(power_callback, pattern=r"^pw:"))

@@ -14,75 +14,22 @@
 
 import time
 import uuid
-import psutil
 import logging
-from pathlib import Path
-from contextlib import suppress
+import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
 
-from bot.config import LOG_CHANNEL_ID, DC_IGNORE_DIRS, DC_IGNORE_UPDATE_NOTIF_DIRS
-from bot.features.fetch import run_fastfetch
+from bot.config import (
+    LOG_CHANNEL_ID,
+    DC_IGNORE_DIRS,
+    DC_IGNORE_UPDATE_NOTIF_DIRS,
+    NOTIFY_DOCKER_UPDATES,
+)
 from bot.features.dcupdate import check_dir_updates, get_system_arch
 from bot.features.dcaction import list_docker_dirs, dc_callback_data
-from telegram.ext import ContextTypes
 from bot.logger import log_job
 
 log = logging.getLogger(__name__)
-
-# --- Alert watchdog data ---
-last_alert = {"temp": 0.0, "ram": 0.0}
-
-
-def _get_uptime() -> float:
-    try:
-        return float(Path("/proc/uptime").read_text().split()[0])
-    except Exception:
-        return 0.0
-
-
-async def notify_boot_job(context: ContextTypes.DEFAULT_TYPE):
-    server_uptime = _get_uptime()
-    reason = "server reboot" if server_uptime < 60 else "manual restart"
-    await context.bot.send_message(
-        chat_id=LOG_CHANNEL_ID,
-        text=f"✅ Bot started (reason: {reason})",
-    )
-
-
-async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
-    bot = context.bot
-    now = time.time()
-    temp_c = 0.0
-
-    # Get first available temperature
-    temps = psutil.sensors_temperatures()
-    for entries in temps.values():
-        for e in entries:
-            if e.current:
-                temp_c = e.current
-                break
-        if temp_c:
-            break
-
-    mem_pct = psutil.virtual_memory().percent
-
-    # CPU temp alert (65°C) - Cooldown 30 mins
-    if temp_c > 65 and (now - last_alert["temp"] > 1800):
-        last_alert["temp"] = now
-        await bot.send_message(
-            chat_id=LOG_CHANNEL_ID,
-            text=f"🔥 *High CPU Temp:* `{temp_c:.1f}°C`",
-            parse_mode="Markdown",
-        )
-
-    # RAM alert (80%) - Cooldown 30 mins
-    if mem_pct > 80 and (now - last_alert["ram"] > 1800):
-        last_alert["ram"] = now
-        await bot.send_message(
-            chat_id=LOG_CHANNEL_ID,
-            text=f"📈 *High RAM Usage:* `{mem_pct:.1f}%`",
-            parse_mode="Markdown",
-        )
 
 
 async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
@@ -183,37 +130,12 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def live_fastfetch(context: ContextTypes.DEFAULT_TYPE):
-    fetch_info = run_fastfetch()
-    timestamp = time.strftime("%Y-%m-%d %I:%M:%S %p", time.localtime())
-    message_text = f"```\n{fetch_info}\n```\n_Last updated: {timestamp}_"
-    sent_msg_id = context.bot_data.get("fastfetch_msg_id")
-    # Try editing existing message
-    if sent_msg_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=LOG_CHANNEL_ID,
-                message_id=sent_msg_id,
-                text=message_text,
-                parse_mode="Markdown",
-            )
-            return
-        except Exception as e:
-            print("Fastfetch edit failed:", e)
-            # Delete old message id on failure
-            with suppress(Exception):
-                await context.bot.delete_message(
-                    chat_id=LOG_CHANNEL_ID,
-                    message_id=sent_msg_id,
-                )
+def register_jobs(job_queue):
+    if not NOTIFY_DOCKER_UPDATES:
+        return
 
-    # Send new message fallback
-    msg = await context.bot.send_message(
-        chat_id=LOG_CHANNEL_ID,
-        text=message_text,
-        parse_mode="Markdown",
+    job_queue.run_daily(
+        dcupdate_job,
+        time=datetime.time(hour=1, minute=0),
+        job_kwargs={"misfire_grace_time": 60},
     )
-    with suppress(Exception):
-        await msg.pin()
-    # Store message ID for future edits
-    context.bot_data["fastfetch_msg_id"] = msg.message_id

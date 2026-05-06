@@ -24,7 +24,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
@@ -192,3 +192,16 @@ async def fetch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=fetch_keyboard(uid, msg_id, include_ip),
     )
+
+
+def get_help_section() -> str:
+    return "‣ <code>/fetch</code> — Display system information using Fastfetch"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("fetch", "Display system information using Fastfetch")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("fetch", fetch))
+    app.add_handler(CallbackQueryHandler(fetch_callback, pattern=r"^ffc:"))

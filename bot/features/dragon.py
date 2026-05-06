@@ -26,7 +26,7 @@ from pathlib import Path
 from collections import OrderedDict
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.auth import restricted, is_authorized_callback_user
 from bot.logger import log_callback, log_security_event
@@ -513,11 +513,6 @@ def dragon_keyboard(user_id, msg_id, verbose):
 
 @restricted
 async def dragon(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_dragon_q6a():
-        return await update.message.reply_text(
-            "❌ This command only supports Radxa Dragon Q6A."
-        )
-
     verbose = bool(context.args and "--verbose" in context.args)
 
     msg = await update.message.reply_text("📡 Reading sensors...")
@@ -624,3 +619,22 @@ async def dragon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Error: `{e}`",
             parse_mode="Markdown",
         )
+
+
+def get_help_section() -> str | None:
+    if not is_dragon_q6a():
+        return None
+    return "‣ <code>/dragon</code> — Get Dragon Q6A hardware report"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    if not is_dragon_q6a():
+        return []
+    return [("dragon", "Get Dragon Q6A hardware report")]
+
+
+def register_handlers(app):
+    if not is_dragon_q6a():
+        return
+    app.add_handler(CommandHandler("dragon", dragon))
+    app.add_handler(CallbackQueryHandler(dragon_callback, pattern=r"^drg:"))

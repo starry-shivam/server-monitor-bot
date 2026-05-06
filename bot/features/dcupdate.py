@@ -20,7 +20,7 @@ import platform
 import shutil
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
 from bot.config import DOCKER_APPS_DIR, DC_IGNORE_DIRS
@@ -221,3 +221,15 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
 
     await status_msg.edit_text(final_text, parse_mode="HTML")
+
+
+def get_help_section() -> str:
+    return "‣ <code>/dcupdate</code> — Check for Docker container updates"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("dcupdate", "Check for Docker container updates")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("dcupdate", dcupdate))

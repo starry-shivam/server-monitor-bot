@@ -30,7 +30,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InputMediaPhoto,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.features import cb_sign
 from bot.auth import restricted, is_authorized_callback_user
@@ -383,3 +383,16 @@ async def metrics_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InputMediaPhoto(media=img, caption="📊 System Resource Usage"),
         reply_markup=metrics_keyboard(uid, msg_id),
     )
+
+
+def get_help_section() -> str:
+    return "‣ <code>/metrics</code> — Visual CPU, RAM, disk usage"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("metrics", "Visual CPU, RAM, disk usage")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("metrics", metrics))
+    app.add_handler(CallbackQueryHandler(metrics_callback, pattern=r"^mtr:"))

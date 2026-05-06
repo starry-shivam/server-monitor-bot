@@ -26,7 +26,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.features import cb_sign
 from bot.logger import log_callback, log_security_event
@@ -258,3 +258,16 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ {escape(str(e))}",
             parse_mode="HTML",
         )
+
+
+def get_help_section() -> str:
+    return "‣ <code>/shell</code> — Execute approved read-only shell commands"
+
+
+def get_commands() -> list[tuple[str, str]]:
+    return [("shell", "Execute approved read-only shell commands")]
+
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("shell", shell))
+    app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))
