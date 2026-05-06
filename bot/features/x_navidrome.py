@@ -25,6 +25,7 @@ import html
 import shutil
 import logging
 import subprocess
+import asyncio
 from pathlib import Path
 
 from telegram import Update
@@ -50,7 +51,18 @@ _PLAYLIST_UPDATE_SCRIPT = (
 )
 
 
-def _generate_playlists(music_dir: Path) -> str:
+def _collect_playlist_stats(music_dir: Path) -> tuple[int, int]:
+    subdirs = sorted(p for p in music_dir.iterdir() if p.is_dir())
+    playlist_count = len(subdirs)
+    track_count = 0
+
+    for subdir in subdirs:
+        track_count += sum(1 for p in subdir.rglob("*") if p.is_file())
+
+    return playlist_count, track_count
+
+
+def _generate_playlists(music_dir: Path) -> tuple[int, int]:
     proc = subprocess.run(
         ["bash", "-lc", _PLAYLIST_UPDATE_SCRIPT],
         cwd=music_dir,
@@ -64,7 +76,8 @@ def _generate_playlists(music_dir: Path) -> str:
     if proc.returncode != 0:
         raise RuntimeError(output or "Playlist update command failed")
 
-    return output or "Playlists updated successfully."
+    playlist_count, track_count = _collect_playlist_stats(music_dir)
+    return playlist_count, track_count
 
 
 @restricted
@@ -73,10 +86,14 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ This command is disabled.")
 
     if not shutil.which("bash"):
-        return await update.message.reply_text("❌ bash is not available on this system.")
+        return await update.message.reply_text(
+            "❌ bash is not available on this system."
+        )
 
     if not shutil.which("docker"):
-        return await update.message.reply_text("❌ Docker CLI not found on this system.")
+        return await update.message.reply_text(
+            "❌ Docker CLI not found on this system."
+        )
 
     if not NAVIDROME_MUSIC_DIR.exists() or not NAVIDROME_MUSIC_DIR.is_dir():
         return await update.message.reply_text(
@@ -84,13 +101,16 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-    status_msg = await update.message.reply_text(
-        "🎵 Updating Navidrome playlists and restarting app..."
-    )
+    status_msg = await update.message.reply_text("🎵 Updating playlists...")
+    await asyncio.sleep(0.8)
 
     try:
-        playlist_output = _generate_playlists(NAVIDROME_MUSIC_DIR)
+        playlists_updated, tracks_indexed = _generate_playlists(NAVIDROME_MUSIC_DIR)
+
+        await status_msg.edit_text("🐋 Restarting Navidrome...")
+
         restart_output = run_single_dc("restart", NAVIDROME_APP_DIR)
+
     except Exception as e:
         log.error("update_playlist failed: %s", e)
         return await status_msg.edit_text(
@@ -98,14 +118,15 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-    playlist_output = tail_log_lines(playlist_output, 15)
     restart_output = tail_log_lines(restart_output, 25)
 
     text = (
         "✅ <b>Playlist update complete</b>\n\n"
+        f"<b>Playlists updated:</b> {playlists_updated}\n"
+        f"<b>Tracks indexed:</b> {tracks_indexed:,}\n"
+        "\n"
         f"<b>Music dir:</b> <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>\n"
         f"<b>Docker app:</b> <code>{html.escape(NAVIDROME_APP_DIR)}</code>\n\n"
-        f"<b>Playlist command output</b>\n<pre>{html.escape(playlist_output or 'No output.')}</pre>\n"
         f"<b>Docker restart output</b>\n<pre>{html.escape(restart_output or 'No output.')}</pre>"
     )
 
@@ -113,7 +134,6 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             "✅ <b>Playlist update complete</b>\n"
             "(Output was too long and has been truncated.)\n\n"
-            f"<b>Playlist command output</b>\n<pre>{html.escape(tail_log_lines(playlist_output, 8))}</pre>\n"
             f"<b>Docker restart output</b>\n<pre>{html.escape(tail_log_lines(restart_output, 12))}</pre>"
         )
 
@@ -123,7 +143,9 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def get_help_section() -> str | None:
     if not NAVIDROME_PLAYLIST_UPDATE_CMD:
         return None
-    return "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists and restart Navidrome"
+    return (
+        "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists and restart Navidrome"
+    )
 
 
 def get_commands() -> list[tuple[str, str]]:
