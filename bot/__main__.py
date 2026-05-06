@@ -29,7 +29,7 @@ from telegram.ext import (
 )
 
 from bot.auth import restricted
-from bot.logger import setup_logging
+from bot.logger import log_component_event, setup_logging
 from bot.config import (
     BOT_TOKEN,
 )
@@ -121,13 +121,25 @@ def main():
 
     # Dynamically register all feature module handlers
     num_modules = register_all_handlers(app)
-    log.info(f"Registered {num_modules} feature module(s)")
+    log_component_event(
+        log,
+        "bootstrap",
+        "register_feature_modules",
+        "completed",
+        detail=f"count={num_modules}",
+    )
 
     # Dynamically register all job modules
     num_jobs = register_all_jobs(app.job_queue)
-    log.info(f"Registered {num_jobs} job module(s)")
+    log_component_event(
+        log,
+        "bootstrap",
+        "register_job_modules",
+        "completed",
+        detail=f"count={num_jobs}",
+    )
 
-    log.info("🤖 Bot is running…")
+    log_component_event(log, "bootstrap", "run_polling", "started")
     app.run_polling()
 
 

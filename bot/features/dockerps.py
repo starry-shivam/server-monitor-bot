@@ -326,6 +326,8 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption="🔍 Inspecting available containers...",
     )
 
+    log_callback(log, update.effective_user, "dockerps", "run", "accepted")
+
     try:
         rows = _collect_docker_containers()
         if not rows:
@@ -343,8 +345,17 @@ async def dockerps(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg.message_id,
             ),
         )
+        log_callback(log, update.effective_user, "dockerps", "run", "completed")
 
     except Exception as err:
+        log_callback(
+            log,
+            update.effective_user,
+            "dockerps",
+            "run",
+            "failed",
+            detail=str(err),
+        )
         await msg.edit_media(
             InputMediaPhoto(
                 media="https://i.postimg.cc/4d7k0rdX/IMG-20251230-195209.jpg",

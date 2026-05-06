@@ -29,6 +29,8 @@ import importlib
 import logging
 from pathlib import Path
 
+from bot.logger import log_component_event
+
 log = logging.getLogger(__name__)
 
 FEATURES_DIR = Path(__file__).parent / "features"
@@ -58,7 +60,14 @@ def load_feature_modules() -> list[tuple[str, callable, callable, callable]]:
     modules = []
 
     if not FEATURES_DIR.exists():
-        log.error(f"Features directory not found: {FEATURES_DIR}")
+        log_component_event(
+            log,
+            "loader",
+            "discover_features",
+            "failed",
+            detail=f"directory_not_found path={FEATURES_DIR}",
+            level=logging.ERROR,
+        )
         return modules
 
     # Find all .py files in features directory (exclude __init__.py)
@@ -76,8 +85,16 @@ def load_feature_modules() -> list[tuple[str, callable, callable, callable]]:
             module = importlib.import_module(full_module_name)
 
             if not _is_valid_module(module, REQUIRED_FEATURE_EXPORTS):
-                log.warning(
-                    f"Module {module_name} missing required exports (register_handlers, get_help_section, get_commands), skipping"
+                log_component_event(
+                    log,
+                    "loader",
+                    "load_feature_module",
+                    "skipped",
+                    detail=(
+                        f"module={module_name} reason=missing_exports "
+                        "required=register_handlers,get_help_section,get_commands"
+                    ),
+                    level=logging.WARNING,
                 )
                 continue
 
@@ -86,9 +103,23 @@ def load_feature_modules() -> list[tuple[str, callable, callable, callable]]:
             commands_func = getattr(module, "get_commands")
 
             modules.append((module_name, register_func, help_func, commands_func))
+            log_component_event(
+                log,
+                "loader",
+                "load_feature_module",
+                "loaded",
+                detail=f"module={module_name}",
+            )
 
         except Exception as e:
-            log.error(f"Failed to load feature module {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "load_feature_module",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
             continue
 
     return modules
@@ -104,7 +135,14 @@ def load_job_modules() -> list[tuple[str, callable]]:
     modules = []
 
     if not JOBS_DIR.exists():
-        log.error(f"Jobs directory not found: {JOBS_DIR}")
+        log_component_event(
+            log,
+            "loader",
+            "discover_jobs",
+            "failed",
+            detail=f"directory_not_found path={JOBS_DIR}",
+            level=logging.ERROR,
+        )
         return modules
 
     # Find all .py files in jobs directory (exclude __init__.py)
@@ -122,16 +160,38 @@ def load_job_modules() -> list[tuple[str, callable]]:
             module = importlib.import_module(full_module_name)
 
             if not _is_valid_module(module, REQUIRED_JOB_EXPORTS):
-                log.warning(
-                    f"Module {module_name} missing required export (register_jobs), skipping"
+                log_component_event(
+                    log,
+                    "loader",
+                    "load_job_module",
+                    "skipped",
+                    detail=(
+                        f"module={module_name} reason=missing_exports "
+                        "required=register_jobs"
+                    ),
+                    level=logging.WARNING,
                 )
                 continue
 
             register_func = getattr(module, "register_jobs")
             modules.append((module_name, register_func))
+            log_component_event(
+                log,
+                "loader",
+                "load_job_module",
+                "loaded",
+                detail=f"module={module_name}",
+            )
 
         except Exception as e:
-            log.error(f"Failed to load job module {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "load_job_module",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
             continue
 
     return modules
@@ -154,8 +214,22 @@ def register_all_handlers(app) -> int:
         try:
             register_func(app)
             count += 1
+            log_component_event(
+                log,
+                "loader",
+                "register_handlers",
+                "completed",
+                detail=f"module={module_name}",
+            )
         except Exception as e:
-            log.error(f"Failed to register handlers for {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "register_handlers",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
 
     return count
 
@@ -176,7 +250,14 @@ def collect_help_sections() -> list[str]:
             if help_text:
                 help_sections.append(help_text)
         except Exception as e:
-            log.error(f"Failed to get help from {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "collect_help",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
 
     return help_sections
 
@@ -197,7 +278,14 @@ def collect_all_commands() -> list[tuple[str, str]]:
             if module_commands:
                 commands.extend(module_commands)
         except Exception as e:
-            log.error(f"Failed to get commands from {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "collect_commands",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
 
     return commands
 
@@ -233,11 +321,24 @@ async def set_bot_commands(app) -> bool:
 
         # Set bot commands via Telegram API
         await app.bot.set_my_commands(bot_commands)
-        log.info(f"Registered {len(bot_commands)} bot commands")
+        log_component_event(
+            log,
+            "loader",
+            "set_bot_commands",
+            "completed",
+            detail=f"count={len(bot_commands)}",
+        )
         return True
 
     except Exception as e:
-        log.error(f"Failed to set bot commands: {e}")
+        log_component_event(
+            log,
+            "loader",
+            "set_bot_commands",
+            "failed",
+            detail=f"error={e}",
+            level=logging.ERROR,
+        )
         return False
 
 
@@ -258,7 +359,21 @@ def register_all_jobs(job_queue) -> int:
         try:
             register_func(job_queue)
             count += 1
+            log_component_event(
+                log,
+                "loader",
+                "register_jobs",
+                "completed",
+                detail=f"module={module_name}",
+            )
         except Exception as e:
-            log.error(f"Failed to register jobs for {module_name}: {e}")
+            log_component_event(
+                log,
+                "loader",
+                "register_jobs",
+                "failed",
+                detail=f"module={module_name} error={e}",
+                level=logging.ERROR,
+            )
 
     return count

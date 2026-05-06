@@ -194,10 +194,13 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Give Telegram time to deliver
             await asyncio.sleep(1)
 
-            log.warning(
-                "POWER ACTION EXECUTED: %s by user %s",
+            log_callback(
+                log,
+                user,
+                "power",
                 action,
-                uid,
+                "executed",
+                detail=f"unit={meta['unit']}",
             )
 
             subprocess.run(
@@ -207,6 +210,8 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            log_callback(log, user, "power", action, "failed", detail=str(e))
 
     task = asyncio.create_task(countdown())
     context.bot_data["shutdown_task"] = task

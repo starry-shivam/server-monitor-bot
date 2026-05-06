@@ -33,6 +33,7 @@ from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
 from bot.features.dcaction import run_single_dc, tail_log_lines
+from bot.logger import log_callback
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +86,8 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not NAVIDROME_PLAYLIST_UPDATE_CMD:
         return await update.message.reply_text("❌ This command is disabled.")
 
+    log_callback(log, update.effective_user, "navidrome", "update_playlist", "accepted")
+
     if not shutil.which("bash"):
         return await update.message.reply_text(
             "❌ bash is not available on this system."
@@ -112,7 +115,14 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         restart_output = run_single_dc("restart", NAVIDROME_APP_DIR)
 
     except Exception as e:
-        log.error("update_playlist failed: %s", e)
+        log_callback(
+            log,
+            update.effective_user,
+            "navidrome",
+            "update_playlist",
+            "failed",
+            detail=str(e),
+        )
         return await status_msg.edit_text(
             f"❌ <b>Update failed</b>\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
@@ -137,6 +147,14 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>Docker restart output</b>\n<pre>{html.escape(tail_log_lines(restart_output, 12))}</pre>"
         )
 
+    log_callback(
+        log,
+        update.effective_user,
+        "navidrome",
+        "update_playlist",
+        "completed",
+        detail=f"playlists={playlists_updated} tracks={tracks_indexed}",
+    )
     await status_msg.edit_text(text, parse_mode="HTML")
 
 

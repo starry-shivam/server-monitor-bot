@@ -81,6 +81,21 @@ def log_job(
     logger.info(message)
 
 
+def log_component_event(
+    logger: logging.Logger,
+    component: str,
+    action: str,
+    status: str,
+    detail: str = "",
+    *,
+    level: int = logging.INFO,
+) -> None:
+    message = f"component={component} action={action} status={status}"
+    if detail:
+        message = f"{message} detail={detail}"
+    logger.log(level, message)
+
+
 def log_security_event(
     logger: logging.Logger, event: str, status: str, detail: str = ""
 ) -> None:

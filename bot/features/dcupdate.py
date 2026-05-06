@@ -18,6 +18,7 @@ import subprocess
 import json
 import platform
 import shutil
+import logging
 
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
@@ -25,6 +26,9 @@ from telegram.ext import ContextTypes, CommandHandler
 from bot.auth import restricted
 from bot.config import DOCKER_APPS_DIR, DC_IGNORE_DIRS
 from bot.features.dcaction import list_docker_dirs, has_compose_file
+from bot.logger import log_callback
+
+log = logging.getLogger(__name__)
 
 # ================= System Helpers =================
 
@@ -154,11 +158,14 @@ def has_dir_updates(dir_name: str, system_arch: str | None = None) -> bool:
 async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_msg = update.message
+    user = update.effective_user
 
     if not shutil.which("docker"):
         return await update.message.reply_text(
             "❌ Docker CLI not found on this system."
         )
+
+    log_callback(log, user, "dcupdate", "run", "accepted")
 
     status_msg = await user_msg.reply_text(
         "🔎 <b>Checking registries for updates...</b>", parse_mode="HTML"
@@ -193,6 +200,7 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 results[app_dir] = updates
 
     except Exception as e:
+        log_callback(log, user, "dcupdate", "run", "failed", detail=str(e))
         await status_msg.edit_text(
             f"❌ <b>Error:</b>\n<code>{str(e)}</code>", parse_mode="HTML"
         )
@@ -220,6 +228,14 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             final_text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
 
+    log_callback(
+        log,
+        user,
+        "dcupdate",
+        "run",
+        "completed",
+        detail=f"targets={len(targets)} updates={len(results)}",
+    )
     await status_msg.edit_text(final_text, parse_mode="HTML")
 
 
