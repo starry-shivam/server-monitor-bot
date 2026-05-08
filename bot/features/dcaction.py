@@ -209,7 +209,7 @@ def run_bulk_dc(action: str) -> str:
     return output.strip() or "No output."
 
 
-def run_docker_cleanup() -> str:
+def run_docker_prune_full() -> str:
     proc = subprocess.run(
         ["docker", "system", "prune", "-a", "-f"],
         capture_output=True,
@@ -221,10 +221,10 @@ def run_docker_cleanup() -> str:
     return output.strip() or "No output."
 
 
-def run_docker_prune_preserve_build_cache() -> str:
+def run_docker_prune() -> str:
     commands = [
         ["docker", "container", "prune", "-f"],
-        ["docker", "image", "prune", "-a", "-f"],
+        ["docker", "image", "prune", "-f"],
         ["docker", "network", "prune", "-f"],
     ]
     outputs: list[str] = []
@@ -545,11 +545,11 @@ async def handle_cleanup_callback(q, cleanup_action: str):
 
     try:
         if cleanup_action == "prune":
-            output = run_docker_prune_preserve_build_cache()
+            output = run_docker_prune()
             title = "🧽 <b>Docker Prune Logs (Build Cache Preserved)</b>"
             event_action = "cleanup_prune"
         else:
-            output = run_docker_cleanup()
+            output = run_docker_prune_full()
             title = "🧹 <b>Docker Cleanup Logs (Full)</b>"
             event_action = "cleanup_full"
 
@@ -577,7 +577,7 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
 
     try:
         if action == "prune":
-            output = run_docker_prune_preserve_build_cache()
+            output = run_docker_prune()
             log_callback(log, q.from_user, "dcaction", action, "executed", detail="ALL")
 
             if len(output) > 2000:
@@ -590,7 +590,7 @@ async def handle_run_callback(q, uid: int, action: str, target: str):
             )
 
         if action == "prune_full":
-            output = run_docker_cleanup()
+            output = run_docker_prune_full()
             log_callback(log, q.from_user, "dcaction", action, "executed", detail="ALL")
 
             if len(output) > 2000:
