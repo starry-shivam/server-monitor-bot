@@ -136,6 +136,6 @@ def register_jobs(job_queue):
 
     job_queue.run_daily(
         dcupdate_job,
-        time=datetime.time(hour=1, minute=0),
+        time=datetime.time(hour=9, minute=29),
         job_kwargs={"misfire_grace_time": 60},
     )
