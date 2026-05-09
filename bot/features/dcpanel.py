@@ -314,7 +314,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = _get_panel_state(context, q.message.chat_id, q.message.message_id)
     if not state:
-        await q.answer()
+        await q.answer("Panel state not found or expired. Rebuilt successfully.", show_alert=True)
         log_callback(log, q.from_user, "dcpanel", "restore", "restored")
         return await _render_panel(
             q,
