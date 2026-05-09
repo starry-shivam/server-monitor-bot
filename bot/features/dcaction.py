@@ -31,9 +31,7 @@ from bot.features import cb_sign
 from bot.logger import log_callback, log_security_event
 from bot.config import (
     DOCKER_APPS_DIR,
-    DC_SCRIPT,
     DC_ALLOWED_ACTIONS,
-    DC_BULK_ACTIONS,
     DC_IGNORE_DIRS,
     CALLBACK_TTL,
 )
@@ -50,6 +48,8 @@ COMPOSE_FILES = {
     "compose.yml",
     "compose.yaml",
 }
+
+BULK_ACTIONS = {"up", "stop", "update"}
 
 
 def has_compose_file(dir_path: Path) -> bool:
@@ -163,7 +163,7 @@ def run_single_dc(action: str, name: str) -> str:
 
 
 def run_bulk_dc(action: str) -> str:
-    if action not in DC_BULK_ACTIONS:
+    if action not in BULK_ACTIONS:
         raise ValueError("Unsupported action")
 
     if action == "update":
@@ -192,21 +192,24 @@ def run_bulk_dc(action: str) -> str:
 
         return "\n\n".join(sections) or "No output."
 
-    cmd = ["bash", DC_SCRIPT, action, "--no-color"]
-    if DC_IGNORE_DIRS:
-        ignore_arg = ",".join(DC_IGNORE_DIRS)
-        cmd.extend(["--ignore", ignore_arg])
+    sections: list[str] = []
+    for name in list_docker_dirs():
+        dir_path = DOCKER_APPS_DIR / name
+        try:
+            if action == "up" and is_compose_status(dir_path, "running"):
+                sections.append(f"[{name}] Already running.")
+                continue
+            if action == "stop" and not is_compose_status(dir_path, "running"):
+                sections.append(f"[{name}] Already stopped.")
+                continue
 
-    proc = subprocess.run(
-        cmd,
-        cwd=DOCKER_APPS_DIR,
-        capture_output=True,
-        text=True,
-        timeout=2200,
-    )
+            output = run_single_dc(action, name)
+            trimmed = tail_log_lines(output, 20).strip() or "No output."
+            sections.append(f"[{name}]\n{trimmed}")
+        except Exception as e:
+            sections.append(f"[{name}] Failed: {e}")
 
-    output = (proc.stdout or "") + (proc.stderr or "")
-    return output.strip() or "No output."
+    return "\n\n".join(sections) or "No output."
 
 
 def run_docker_prune_full() -> str:
@@ -736,11 +739,11 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=dc_keyboard(user_id, ts, prune_action, "ALL"),
         )
 
-    if is_all and action not in DC_BULK_ACTIONS:
+    if is_all and action not in BULK_ACTIONS:
         return await update.message.reply_text(
             f"❌ The <code>--all</code> option is not supported for "
             f"<code>{action}</code>.\n\n"
-            f"Allowed with: {', '.join(DC_BULK_ACTIONS)}",
+            f"Allowed with: {', '.join(sorted(BULK_ACTIONS))}",
             parse_mode="HTML",
         )
 

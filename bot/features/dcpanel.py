@@ -33,15 +33,11 @@ from bot.logger import log_callback, log_security_event
 
 log = logging.getLogger(__name__)
 
-_BUSY_MESSAGE_KEYS: set[str] = set()
+_GLOBAL_ACTION_RUNNING = False
 
 
 def _panel_store_key(chat_id: int, message_id: int) -> str:
     return f"dcpanel:{chat_id}:{message_id}"
-
-
-def _busy_key(chat_id: int, message_id: int) -> str:
-    return f"{chat_id}:{message_id}"
 
 
 def _status_for_dir(name: str) -> str:
@@ -115,18 +111,22 @@ def _validate_callback_signature(parsed: tuple[str, int, int, int, str, str]) ->
 
 def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
     rows: list[list[InlineKeyboardButton]] = []
+    current_row: list[InlineKeyboardButton] = []
 
     for idx, app in enumerate(apps):
         status = app["status"]
-        _, short_action, _ = _next_action_for_status(status)
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"{_status_emoji(status)} {app['name']} [{short_action}]",
-                    callback_data=_cb_data("pick", uid, ts, msg_id, str(idx)),
-                )
-            ]
+        current_row.append(
+            InlineKeyboardButton(
+                f"{_status_emoji(status)} {app['name']}",
+                callback_data=_cb_data("pick", uid, ts, msg_id, str(idx)),
+            )
         )
+        if len(current_row) == 2:
+            rows.append(current_row)
+            current_row = []
+
+    if current_row:
+        rows.append(current_row)
 
     rows.append(
         [
@@ -138,6 +138,14 @@ def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
                 "⏹ Stop All",
                 callback_data=_cb_data("pick", uid, ts, msg_id, "all_stop"),
             ),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "🔄 Refresh Status",
+                callback_data=_cb_data("refresh", uid, ts, msg_id, "-"),
+            )
         ]
     )
     return InlineKeyboardMarkup(rows)
@@ -187,7 +195,7 @@ async def _render_panel(
     context: ContextTypes.DEFAULT_TYPE,
     uid: int,
     *,
-    show_refreshed_hint: bool = False,
+    notice: str | None = None,
 ) -> None:
     apps = await asyncio.to_thread(_collect_apps)
     chat_id = q.message.chat_id
@@ -195,8 +203,8 @@ async def _render_panel(
     _set_panel_state(context, chat_id, msg_id, uid, apps)
 
     panel_text = _panel_text(apps)
-    if show_refreshed_hint:
-        panel_text += "\n\n✅ Action complete."
+    if notice:
+        panel_text += f"\n\n{notice}"
 
     await q.edit_message_text(
         panel_text,
@@ -229,6 +237,12 @@ async def _run_for_all(action: str, apps: list[dict[str, str]]) -> tuple[int, in
 
 @restricted
 async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if _GLOBAL_ACTION_RUNNING:
+        return await update.message.reply_text(
+            "⏳ A Docker panel action is already running. Please wait for it to finish."
+        )
+
     if not shutil.which("docker"):
         return await update.message.reply_text("❌ Docker CLI not found on this system.")
 
@@ -241,7 +255,6 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not apps:
         return await update.message.reply_text("❌ No docker app directories found.")
 
-    user_id = update.effective_user.id
     msg = await update.message.reply_text(
         _panel_text(apps),
         parse_mode="HTML",
@@ -256,6 +269,8 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _GLOBAL_ACTION_RUNNING
+
     q = update.callback_query
     parsed = _parse_callback(q.data or "")
     if parsed is None:
@@ -291,9 +306,11 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not q.message or q.message.message_id != msg_id:
         return await q.answer("🚫 Message mismatch", show_alert=True)
 
-    busy = _busy_key(q.message.chat_id, q.message.message_id)
-    if busy in _BUSY_MESSAGE_KEYS and kind != "back":
-        return await q.answer("⏳ Action already running for this panel", show_alert=True)
+    if _GLOBAL_ACTION_RUNNING:
+        return await q.answer(
+            "⏳ A Docker panel action is already running. Please wait.",
+            show_alert=True,
+        )
 
     state = _get_panel_state(context, q.message.chat_id, q.message.message_id)
     if not state:
@@ -305,6 +322,10 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if kind == "back":
         log_callback(log, q.from_user, "dcpanel", "cancel", "cancelled")
         return await _render_panel(q, context, uid)
+
+    if kind == "refresh":
+        log_callback(log, q.from_user, "dcpanel", "refresh", "executed")
+        return await _render_panel(q, context, uid, notice="✅ Status refreshed.")
 
     if kind == "pick":
         if arg in {"all_up", "all_stop"}:
@@ -350,11 +371,17 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if kind != "run":
         return await q.answer("🚫 Invalid callback type", show_alert=True)
 
-    _BUSY_MESSAGE_KEYS.add(busy)
+    if _GLOBAL_ACTION_RUNNING:
+        return await q.answer(
+            "⏳ A Docker panel action is already running. Please wait.",
+            show_alert=True,
+        )
+
+    _GLOBAL_ACTION_RUNNING = True
     try:
         await q.edit_message_text(
             "⏳ Executing Docker action...\n"
-            "Please wait, this can take a few seconds.",
+            "Please wait, this can take a while.",
             parse_mode="HTML",
         )
 
@@ -393,7 +420,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 detail=target,
             )
 
-        await _render_panel(q, context, uid, show_refreshed_hint=True)
+        await _render_panel(q, context, uid, notice="✅ Action complete.")
     except Exception as e:
         log_callback(log, q.from_user, "dcpanel", "run", "failed", detail=str(e))
         await q.edit_message_text(
@@ -402,7 +429,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     finally:
-        _BUSY_MESSAGE_KEYS.discard(busy)
+        _GLOBAL_ACTION_RUNNING = False
 
 
 def get_help_section() -> str:

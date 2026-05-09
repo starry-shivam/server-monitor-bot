@@ -68,11 +68,7 @@ DC_ALLOWED_ACTIONS = [
     "logs",
     "restart",
 ]
-# Actions that support --all flag
-DC_BULK_ACTIONS = ["up", "stop", "pause", "unpause", "update"]
 DOCKER_APPS_DIR = Path(os.getenv("DOCKER_APPS_DIR", ""))
-# Should be located in docker apps dir, used to perform bulk (--all) actions
-DC_SCRIPT = os.getenv("DC_SCRIPT", "dc_action.sh")
 # Comma-separated list of directory names to ignore
 DC_IGNORE_DIRS = [
     x.strip() for x in os.getenv("DC_IGNORE_DIRS", "").split(",") if x.strip()
