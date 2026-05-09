@@ -251,20 +251,22 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Docker apps directory not found. Please create it first."
         )
 
-    apps = await asyncio.to_thread(_collect_apps)
-    if not apps:
-        return await update.message.reply_text("❌ No docker app directories found.")
-
     msg = await update.message.reply_text(
-        _panel_text(apps),
+        "⏳ Building Docker panel...",
         parse_mode="HTML",
-        reply_markup=_panel_keyboard(user_id, int(time.time()), 0, apps),
     )
 
-    # Refresh keyboard with final message id so callbacks bind to this panel only.
+    apps = await asyncio.to_thread(_collect_apps)
+    if not apps:
+        await asyncio.sleep(0.8)  # So we don't immediately delete the "Building..." message and cause a jarring flash
+        return await msg.edit_text("❌ No docker app directories found.")
+
+    # Build keyboard with real message id and render in place.
     _set_panel_state(context, msg.chat_id, msg.message_id, user_id, apps)
-    await msg.edit_reply_markup(
-        reply_markup=_panel_keyboard(user_id, int(time.time()), msg.message_id, apps)
+    await msg.edit_text(
+        _panel_text(apps),
+        parse_mode="HTML",
+        reply_markup=_panel_keyboard(user_id, int(time.time()), msg.message_id, apps),
     )
 
 
