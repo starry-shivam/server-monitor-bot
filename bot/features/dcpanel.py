@@ -314,7 +314,14 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = _get_panel_state(context, q.message.chat_id, q.message.message_id)
     if not state:
-        return await q.answer("❌ Panel state missing. Run /dcpanel again.", show_alert=True)
+        await q.answer()
+        log_callback(log, q.from_user, "dcpanel", "restore", "restored")
+        return await _render_panel(
+            q,
+            context,
+            uid,
+            notice="ℹ️ Panel state was reset. Rebuilt successfully.",
+        )
 
     apps: list[dict[str, str]] = state.get("apps", [])
     await q.answer()
