@@ -244,7 +244,9 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if not shutil.which("docker"):
-        return await update.message.reply_text("❌ Docker CLI not found on this system.")
+        return await update.message.reply_text(
+            "❌ Docker CLI not found on this system."
+        )
 
     if not DOCKER_APPS_DIR.exists():
         return await update.message.reply_text(
@@ -258,7 +260,9 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     apps = await asyncio.to_thread(_collect_apps)
     if not apps:
-        await asyncio.sleep(0.8)  # So we don't immediately delete the "Building..." message and cause a jarring flash
+        await asyncio.sleep(
+            0.8
+        )  # So we don't immediately delete the "Building..." message and cause a jarring flash
         return await msg.edit_text("❌ No docker app directories found.")
 
     # Build keyboard with real message id and render in place.
@@ -316,7 +320,9 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = _get_panel_state(context, q.message.chat_id, q.message.message_id)
     if not state:
-        await q.answer("Panel state not found or expired. Rebuilt successfully.", show_alert=True)
+        await q.answer(
+            "Panel state not found or expired. Rebuilt successfully.", show_alert=True
+        )
         log_callback(log, q.from_user, "dcpanel", "restore", "restored")
         return await _render_panel(
             q,
@@ -326,18 +332,20 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     apps: list[dict[str, str]] = state.get("apps", [])
-    await q.answer()
 
     if kind == "back":
+        await q.answer("Cancelling, please wait...")
         log_callback(log, q.from_user, "dcpanel", "cancel", "cancelled")
         return await _render_panel(q, context, uid)
 
     if kind == "refresh":
+        await q.answer("Refreshing panel status...")
         log_callback(log, q.from_user, "dcpanel", "refresh", "executed")
         return await _render_panel(q, context, uid, notice="✅ Status refreshed.")
 
     if kind == "pick":
         if arg in {"all_up", "all_stop"}:
+            await q.answer("Loading confirmation...")
             action = "up" if arg == "all_up" else "stop"
             label = "Start all" if action == "up" else "Stop all"
             return await q.edit_message_text(
@@ -355,8 +363,11 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await q.answer("🚫 Invalid app selection", show_alert=True)
 
         if idx < 0 or idx >= len(apps):
-            return await q.answer("🚫 App entry expired. Reopen panel.", show_alert=True)
+            return await q.answer(
+                "🚫 App entry expired. Reopen panel.", show_alert=True
+            )
 
+        await q.answer("Loading confirmation...")
         selected = apps[idx]
         _raw_action, short_action, display_action = _next_action_for_status(
             selected["status"]
@@ -388,9 +399,9 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     _GLOBAL_ACTION_RUNNING = True
     try:
+        await q.answer("Executing action, please wait...")
         await q.edit_message_text(
-            "⏳ Executing Docker action...\n"
-            "Please wait, this can take a while.",
+            "⏳ Executing Docker action...\n" "Please wait, this can take a while.",
             parse_mode="HTML",
         )
 
@@ -416,7 +427,9 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             action = "up" if short_action == "start" else "stop"
 
             if idx < 0 or idx >= len(apps):
-                return await q.edit_message_text("❌ App entry expired. Run /dcpanel again.")
+                return await q.edit_message_text(
+                    "❌ App entry expired. Run /dcpanel again."
+                )
 
             target = apps[idx]["name"]
             await asyncio.to_thread(run_single_dc, action, target)
@@ -433,8 +446,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log_callback(log, q.from_user, "dcpanel", "run", "failed", detail=str(e))
         await q.edit_message_text(
-            "❌ Docker action failed.\n"
-            f"<code>{e}</code>",
+            "❌ Docker action failed.\n" f"<code>{e}</code>",
             parse_mode="HTML",
         )
     finally:
