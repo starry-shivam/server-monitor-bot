@@ -1,1 +1,1 @@
-## Raspberrypi server management and monitoring telegram bot
+## Server management and monitoring telegram bot

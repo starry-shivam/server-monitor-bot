@@ -65,10 +65,20 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
             header = "Container update available"
 
         text = f"🐳 <b>{header}</b>\n\n"
+        is_single = len(results) == 1
+        single_changelog_url: str | None = None
 
         for app, updates in results.items():
-            image = updates[0].split("(")[-1].rstrip(")")
-            text += f"‣ <b>{app}</b> (<code>{image}</code>)\n"
+            image = (updates[0].get("image") if updates else None) or "unknown"
+            line = f"‣ <b>{app}</b> (<code>{image}</code>)"
+
+            changelog_url = updates[0].get("github_changelog") if updates else None
+            if is_single and changelog_url:
+                single_changelog_url = changelog_url
+            elif (not is_single) and changelog_url:
+                line += f' - <a href="{changelog_url}">changelog</a>'
+
+            text += f"{line}\n"
         text += "\n"
 
         # suggest update command
@@ -88,7 +98,16 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
                                 "update",
                                 app_name,
                             ),
-                        )
+                        ),
+                        *(
+                            [
+                                InlineKeyboardButton(
+                                    "📝 Changelog", url=single_changelog_url
+                                )
+                            ]
+                            if single_changelog_url
+                            else []
+                        ),
                     ]
                 ]
             )
@@ -118,6 +137,7 @@ async def dcupdate_job(context: ContextTypes.DEFAULT_TYPE):
             text=text,
             parse_mode="HTML",
             reply_markup=keyboard,
+            disable_web_page_preview=True,
         )
         log_job(log, "dcupdate", "completed", detail=f"updates_found={len(results)}")
 
@@ -136,6 +156,11 @@ def register_jobs(job_queue):
 
     job_queue.run_daily(
         dcupdate_job,
-        time=datetime.time(hour=9, minute=29),
+        time=datetime.time(hour=9, minute=30),
+        job_kwargs={"misfire_grace_time": 60},
+    )
+    job_queue.run_daily(
+        dcupdate_job,
+        time=datetime.time(hour=21, minute=30),
         job_kwargs={"misfire_grace_time": 60},
     )

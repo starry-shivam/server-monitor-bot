@@ -19,8 +19,9 @@ import json
 import platform
 import shutil
 import logging
+from urllib.parse import urlparse
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
@@ -66,7 +67,63 @@ def get_remote_digest(image_name: str, arch: str) -> str | None:
         return None
 
 
-def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
+def _get_image_source_url(image_tag: str) -> str | None:
+    try:
+        proc = subprocess.run(
+            [
+                "docker",
+                "image",
+                "inspect",
+                image_tag,
+                "--format={{json .Config.Labels}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip() not in ("", "null"):
+            labels = json.loads(proc.stdout)
+            if isinstance(labels, dict):
+                src = labels.get("org.opencontainers.image.source")
+                if isinstance(src, str) and src.strip():
+                    return src.strip()
+    except Exception:
+        pass
+
+    return None
+
+
+def _to_github_changelog_url(source_url: str | None) -> str | None:
+    if not source_url:
+        return None
+
+    cleaned = source_url.strip().rstrip("/")
+    if cleaned.startswith("git+"):
+        cleaned = cleaned[4:]
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+
+    try:
+        parsed = urlparse(cleaned)
+        if parsed.netloc.lower() != "github.com":
+            return None
+        path = parsed.path.strip("/")
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 2:
+            return None
+        owner, repo = parts[0], parts[1]
+        return f"https://github.com/{owner}/{repo}/releases"
+    except Exception:
+        return None
+
+
+def get_github_changelog_url(image_tag: str) -> str | None:
+    source = _get_image_source_url(image_tag)
+    return _to_github_changelog_url(source)
+
+
+def check_dir_updates(dir_name: str, system_arch: str) -> list[dict[str, str | None]]:
     dir_path = DOCKER_APPS_DIR / dir_name
     if not dir_path.exists() or not has_compose_file(dir_path):
         return []
@@ -86,7 +143,7 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
     if not ids:
         return []
 
-    updates_found = []
+    updates_found: list[dict[str, str | None]] = []
 
     for cid in ids:
         if not cid:
@@ -133,7 +190,13 @@ def check_dir_updates(dir_name: str, system_arch: str) -> list[str]:
                 continue
 
             if local_digest != remote_digest:
-                updates_found.append(f"• <b>{name}</b> ({image_tag})")
+                updates_found.append(
+                    {
+                        "name": name,
+                        "image": image_tag,
+                        "github_changelog": get_github_changelog_url(image_tag),
+                    }
+                )
 
         except Exception:
             continue
@@ -208,16 +271,29 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not results:
         final_text = "✅ <b>All containers are up to date.</b>"
+        reply_markup = None
     else:
         header = "Container updates available"
         if len(results) == 1:
             header = "Container update available"
 
         final_text = f"📦 <b>{header}</b>\n\n"
+        single_changelog_button: InlineKeyboardButton | None = None
+        is_single = len(results) == 1
 
         for app, updates in results.items():
-            image = updates[0].split("(")[-1].rstrip(")")
-            final_text += f"‣ <b>{app}</b> (<code>{image}</code>)\n"
+            image = (updates[0].get("image") if updates else None) or "unknown"
+            line = f"‣ <b>{app}</b> (<code>{image}</code>)"
+
+            changelog_url = updates[0].get("github_changelog") if updates else None
+            if is_single and changelog_url:
+                single_changelog_button = InlineKeyboardButton(
+                    "📝 Changelog", url=changelog_url
+                )
+            elif (not is_single) and changelog_url:
+                line += f' - <a href="{changelog_url}">changelog</a>'
+
+            final_text += f"{line}\n"
         final_text += "\n"
 
         if len(results) == 1:
@@ -225,8 +301,13 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_text += (
                 f"Run <code>/dcaction update {app_name}</code> to update this app."
             )
+            if single_changelog_button:
+                reply_markup = InlineKeyboardMarkup([[single_changelog_button]])
+            else:
+                reply_markup = None
         else:
             final_text += "Run <code>/dcaction update &lt;dir&gt;</code> to update the specified app."
+            reply_markup = None
 
     log_callback(
         log,
@@ -236,7 +317,12 @@ async def dcupdate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "completed",
         detail=f"targets={len(targets)} updates={len(results)}",
     )
-    await status_msg.edit_text(final_text, parse_mode="HTML")
+    await status_msg.edit_text(
+        final_text,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True,
+    )
 
 
 def get_help_section() -> str:
