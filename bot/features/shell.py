@@ -95,13 +95,6 @@ def _shell_exec(command: str) -> str:
         log_security_event(log, "shell_command", "blocked", detail=command)
         raise PermissionError("Only approved read-only commands are allowed")
 
-    if any(
-        arg.startswith("/") or arg.startswith("../") or arg.startswith("~/")
-        for arg in parts[1:]
-    ):
-        log_security_event(log, "shell_command", "blocked", detail=command)
-        raise PermissionError("Path arguments are not allowed")
-
     proc = subprocess.run(
         parts,
         capture_output=True,
@@ -159,7 +152,7 @@ async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preview = (
         "⚠️ <b>Confirm Shell Command</b>\n\n"
         f"<pre>{escape(cmd)}</pre>\n\n"
-        "Only approved inspection commands are allowed. Proceed?"
+        "For security reasons, only approved read-only commands are allowed. Proceed?"
     )
 
     keyboard = InlineKeyboardMarkup(
