@@ -142,7 +142,10 @@ def run_single_dc(action: str, name: str) -> str:
     elif action == "update":
         build_locally = is_locally_built(dir_path)
         first_step = ["build"] if build_locally else ["pull"]
-        commands_to_run = [first_step, ["down"], ["up", "-d", "--no-build"]]
+        was_running = is_compose_status(dir_path, "running")
+        commands_to_run = [first_step, ["down"]]
+        if was_running:
+            commands_to_run.append(["up", "-d", "--no-build"])
 
     elif action == "logs":
         commands_to_run = [["logs", "--tail", "100"]]
