@@ -1,6 +1,7 @@
-python-telegram-bot[job-queue]>=21.0,<23
-psutil>=5.9
-requests>=2.31
-matplotlib>=3.7
-python-dotenv
-colorlog
+python-telegram-bot[job-queue]>=22.0,<23
+httpx[socks]>=0.28.1
+psutil>=7.2.2
+matplotlib>=3.11
+python-dotenv>=1.2.2
+colorlog>=6.10.1
+ujson>=5.13.0

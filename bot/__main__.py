@@ -14,7 +14,7 @@
 
 import time
 import logging
-import requests as r
+import httpx
 import psutil
 from html import escape
 from zoneinfo import ZoneInfo
@@ -32,6 +32,7 @@ from bot.auth import restricted
 from bot.logger import log_component_event, setup_logging
 from bot.config import (
     BOT_TOKEN,
+    TELEGRAM_PROXY,
 )
 from bot.loader import (
     register_all_handlers,
@@ -80,7 +81,8 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🏓 Pinging Telegram API…")
     start_time = time.time()
-    r.get("https://api.telegram.org", timeout=5)
+    with httpx.Client(proxy=TELEGRAM_PROXY or None, timeout=5.0) as client:
+        client.get("https://api.telegram.org")
     ping_time = round((time.time() - start_time) * 1000, 3)
 
     uptime_seconds = int(time.time() - psutil.boot_time())
@@ -105,14 +107,19 @@ def main():
         """Called after app initialization, before polling."""
         await set_bot_commands(app)
 
-    app = (
+    builder = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .job_queue(JobQueue())
         .defaults(Defaults(tzinfo=ZoneInfo("Asia/Kolkata")))
         .post_init(post_init)
-        .build()
     )
+
+    if TELEGRAM_PROXY:
+        builder = builder.proxy(TELEGRAM_PROXY)
+        builder = builder.get_updates_proxy(TELEGRAM_PROXY)
+
+    app = builder.build()
 
     # Core command handlers
     app.add_handler(CommandHandler("start", start))
