@@ -42,18 +42,26 @@ log = logging.getLogger(__name__)
 # ================= Docker Compose Utils =================
 
 
-COMPOSE_FILES = {
+COMPOSE_FILES = (
     "docker-compose.yml",
     "docker-compose.yaml",
     "compose.yml",
     "compose.yaml",
-}
+)
 
 BULK_ACTIONS = {"up", "stop", "update"}
 
 
 def has_compose_file(dir_path: Path) -> bool:
     return any((dir_path / f).exists() for f in COMPOSE_FILES)
+
+
+def get_compose_file(dir_path: Path) -> Path:
+    for file_name in COMPOSE_FILES:
+        compose_path = dir_path / file_name
+        if compose_path.exists():
+            return compose_path
+    raise RuntimeError("No docker compose file found")
 
 
 def is_locally_built(target: str | Path) -> bool:
@@ -99,7 +107,8 @@ def is_compose_status(dir_path: Path, status: str) -> bool:
 
 
 def run_single_dc(action: str, name: str) -> str:
-    if action not in DC_ALLOWED_ACTIONS:
+    supported_actions = set(DC_ALLOWED_ACTIONS) | {"config_resolve"}
+    if action not in supported_actions:
         raise ValueError("Unsupported action")
 
     dir_path = DOCKER_APPS_DIR / name
@@ -110,6 +119,13 @@ def run_single_dc(action: str, name: str) -> str:
         raise PermissionError(f"`{name}` is ignored permanently")
     if not has_compose_file(dir_path):
         raise RuntimeError("No docker compose file found")
+
+    if action == "config":
+        compose_file = get_compose_file(dir_path)
+        return (
+            compose_file.read_text(encoding="utf-8", errors="replace").strip()
+            or "No output."
+        )
 
     # Only run status checks for actions that require it
     if action == "up" and is_compose_status(dir_path, "running"):
@@ -149,6 +165,9 @@ def run_single_dc(action: str, name: str) -> str:
 
     elif action == "logs":
         commands_to_run = [["logs", "--tail", "100"]]
+
+    elif action == "config_resolve":
+        commands_to_run = [["config"]]
 
     else:
         # Standard single-step actions (up, stop, pause, unpause, down)
@@ -359,7 +378,7 @@ def build_action_preview(action: str, target: str | None) -> str:
         f"• Target: <code>{target or 'ALL'}</code>\n\n"
         "Proceed?"
     )
-    if action == "config":
+    if action.startswith("config"):
         preview += (
             "\n\n<pre>Note: This may leak sensitive information, such as environment variables "
             "and secret keys. It is recommended to run this only in private chats and not in groups.</pre>"
@@ -652,6 +671,7 @@ def dcaction_help() -> str:
         "<b>Available Commands:</b>\n"
         "‣ <code>/dcaction list</code>\n"
         "‣ <code>/dcaction config &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction config &lt;dir&gt; --resolve</code>\n"
         "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
@@ -724,6 +744,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # validate if --all is supported for this action
     is_all = "--all" in args
+    resolve_config = False
 
     if action == "prune":
         is_full = "--full" in args
@@ -750,14 +771,35 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
+    if action == "config":
+        config_tokens = args[1:]
+        invalid_flags = [
+            t for t in config_tokens if t.startswith("--") and t != "--resolve"
+        ]
+        if invalid_flags:
+            return await update.message.reply_text(
+                "❌ Use <code>/dcaction config &lt;dir&gt;</code> or "
+                "<code>/dcaction config &lt;dir&gt; --resolve</code>.",
+                parse_mode="HTML",
+            )
+        non_flag_tokens = [t for t in config_tokens if not t.startswith("--")]
+        if len(non_flag_tokens) != 1:
+            return await update.message.reply_text(
+                "❌ Use <code>/dcaction config &lt;dir&gt;</code> or "
+                "<code>/dcaction config &lt;dir&gt; --resolve</code>.",
+                parse_mode="HTML",
+            )
+        target = non_flag_tokens[0]
+        resolve_config = "--resolve" in config_tokens
+    else:
+        target = None if is_all else (args[1] if len(args) > 1 else None)
+
     # show error if both --all and directory specified
     if is_all and len(args) > 2:
         return await update.message.reply_text(
             "❌ When using <code>--all</code>, do not specify a directory.",
             parse_mode="HTML",
         )
-
-    target = None if is_all else (args[1] if len(args) > 1 else None)
 
     # single target validation
     if not is_all:
@@ -793,11 +835,13 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
     ts = int(time.time())
+    run_action = "config_resolve" if action == "config" and resolve_config else action
+    preview_action = "config --resolve" if run_action == "config_resolve" else action
 
     await update.message.reply_text(
-        build_action_preview(action, target),
+        build_action_preview(preview_action, target),
         parse_mode="HTML",
-        reply_markup=dc_keyboard(user_id, ts, action, target),
+        reply_markup=dc_keyboard(user_id, ts, run_action, target),
     )
 
 
@@ -836,6 +880,7 @@ def get_help_section() -> str:
         "‣ <code>/dcaction</code> — Manage Docker Compose apps\n"
         "    ├ <code>/dcaction list</code>\n"
         "    ├ <code>/dcaction config &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction config &lt;dir&gt; --resolve</code>\n"
         "    ├ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "    ├ <code>/dcaction build &lt;dir&gt;</code>\n"
         "    ├ <code>/dcaction up &lt;dir&gt;</code>\n"
