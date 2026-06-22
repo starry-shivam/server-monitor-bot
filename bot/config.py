@@ -27,6 +27,7 @@ LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 CALLBACK_TTL = int(os.getenv("CALLBACK_TTL", "300"))  # seconds
 CALLBACK_SIG_SECRET = os.getenv("CALLBACK_SIG_SECRET", uuid.uuid4().hex)
 TELEGRAM_PROXY = os.getenv("TELEGRAM_PROXY", "").strip()
+TELEGRAM_API_BASE_URL = os.getenv("TELEGRAM_API_BASE_URL", "").strip().rstrip("/")
 POWER_MGMT_AVAILABLE = os.getenv("POWER_MGMT_AVAILABLE", "false").lower() == "true"
 NOTIFY_DOCKER_UPDATES = os.getenv("NOTIFY_DOCKER_UPDATES", "false").lower() == "true"
 ADDITIONAL_DRIVE_PATHS = [

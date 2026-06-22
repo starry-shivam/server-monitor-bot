@@ -33,6 +33,7 @@ from bot.logger import log_component_event, setup_logging
 from bot.config import (
     BOT_TOKEN,
     TELEGRAM_PROXY,
+    TELEGRAM_API_BASE_URL,
 )
 from bot.loader import (
     register_all_handlers,
@@ -42,6 +43,14 @@ from bot.loader import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _get_telegram_ping_url() -> str:
+    if not TELEGRAM_API_BASE_URL:
+        return "https://api.telegram.org"
+    if TELEGRAM_API_BASE_URL.endswith("/bot"):
+        return TELEGRAM_API_BASE_URL[:-4]
+    return TELEGRAM_API_BASE_URL
 
 
 @restricted
@@ -82,7 +91,7 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🏓 Pinging Telegram API…")
     start_time = time.time()
     with httpx.Client(proxy=TELEGRAM_PROXY or None, timeout=5.0) as client:
-        client.get("https://api.telegram.org")
+        client.get(_get_telegram_ping_url())
     ping_time = round((time.time() - start_time) * 1000, 3)
 
     uptime_seconds = int(time.time() - psutil.boot_time())
@@ -118,6 +127,11 @@ def main():
     if TELEGRAM_PROXY:
         builder = builder.proxy(TELEGRAM_PROXY)
         builder = builder.get_updates_proxy(TELEGRAM_PROXY)
+
+    if TELEGRAM_API_BASE_URL:
+        builder = builder.base_url(TELEGRAM_API_BASE_URL)
+        if TELEGRAM_API_BASE_URL.endswith("/bot"):
+            builder = builder.base_file_url(f"{TELEGRAM_API_BASE_URL[:-4]}/file/bot")
 
     app = builder.build()
 
