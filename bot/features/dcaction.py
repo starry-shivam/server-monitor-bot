@@ -674,8 +674,8 @@ def dcaction_help() -> str:
         "‣ <code>/dcaction config &lt;dir&gt; --resolve</code>\n"
         "‣ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction build &lt;dir&gt;</code>\n"
-        "‣ <code>/dcaction up &lt;dir&gt;</code>\n"
-        "‣ <code>/dcaction up --all</code>\n"
+        "‣ <code>/dcaction start &lt;dir&gt;</code>\n"
+        "‣ <code>/dcaction start --all</code>\n"
         "‣ <code>/dcaction stop &lt;dir&gt;</code>\n"
         "‣ <code>/dcaction stop --all</code>\n"
         "‣ <code>/dcaction down &lt;dir&gt;</code>\n"
@@ -736,10 +736,12 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(text, parse_mode="HTML")
 
     # validate action
-    action = args[0].lower()
+    raw_action = args[0].lower()
+    action = "up" if raw_action == "start" else raw_action
     if action not in DC_ALLOWED_ACTIONS:
+        supported_actions = ["start" if a == "up" else a for a in DC_ALLOWED_ACTIONS]
         return await update.message.reply_text(
-            f"❌ Supported actions: {', '.join(DC_ALLOWED_ACTIONS)}."
+            f"❌ Supported actions: {', '.join(supported_actions)}."
         )
 
     # validate if --all is supported for this action
@@ -764,10 +766,11 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if is_all and action not in BULK_ACTIONS:
+        allowed_with_all = ["start" if a == "up" else a for a in sorted(BULK_ACTIONS)]
         return await update.message.reply_text(
             f"❌ The <code>--all</code> option is not supported for "
-            f"<code>{action}</code>.\n\n"
-            f"Allowed with: {', '.join(sorted(BULK_ACTIONS))}",
+            f"<code>{raw_action}</code>.\n\n"
+            f"Allowed with: {', '.join(allowed_with_all)}",
             parse_mode="HTML",
         )
 
@@ -836,7 +839,7 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ts = int(time.time())
     run_action = "config_resolve" if action == "config" and resolve_config else action
-    preview_action = "config --resolve" if run_action == "config_resolve" else action
+    preview_action = "config --resolve" if run_action == "config_resolve" else raw_action
 
     await update.message.reply_text(
         build_action_preview(preview_action, target),
@@ -883,8 +886,8 @@ def get_help_section() -> str:
         "    ├ <code>/dcaction config &lt;dir&gt; --resolve</code>\n"
         "    ├ <code>/dcaction pull &lt;dir&gt;</code>\n"
         "    ├ <code>/dcaction build &lt;dir&gt;</code>\n"
-        "    ├ <code>/dcaction up &lt;dir&gt;</code>\n"
-        "    ├ <code>/dcaction up --all</code>\n"
+        "    ├ <code>/dcaction start &lt;dir&gt;</code>\n"
+        "    ├ <code>/dcaction start --all</code>\n"
         "    ├ <code>/dcaction stop &lt;dir&gt;</code>\n"
         "    ├ <code>/dcaction stop --all</code>\n"
         "    ├ <code>/dcaction down &lt;dir&gt;</code>\n"

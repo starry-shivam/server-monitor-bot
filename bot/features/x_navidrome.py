@@ -32,7 +32,8 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
-from bot.features.dcaction import run_single_dc, tail_log_lines
+from bot.features.dcaction import has_compose_file, tail_log_lines
+from bot.config import DOCKER_APPS_DIR
 from bot.logger import log_callback
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,29 @@ _PLAYLIST_UPDATE_SCRIPT = (
     'find "$dir" -type f | sort > "${dir}.m3u8"; '
     "done"
 )
+
+
+def _scan_navidrome_library(app_name: str) -> str:
+    dir_path = DOCKER_APPS_DIR / app_name
+
+    if not dir_path.exists():
+        raise FileNotFoundError("Directory does not exist")
+    if not has_compose_file(dir_path):
+        raise RuntimeError("No docker compose file found")
+
+    proc = subprocess.run(
+        ["docker", "compose", "exec", "navidrome", "/app/navidrome", "scan", "-f"],
+        cwd=dir_path,
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        check=False,
+    )
+
+    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode != 0:
+        raise RuntimeError(output or "Navidrome scan command failed")
+    return output or "No output."
 
 
 def _collect_playlist_stats(music_dir: Path) -> tuple[int, int]:
@@ -110,9 +134,9 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         playlists_updated, tracks_indexed = _generate_playlists(NAVIDROME_MUSIC_DIR)
 
-        await status_msg.edit_text("🐋 Restarting Navidrome...")
+        await status_msg.edit_text("🐋 Scanning Navidrome library...")
 
-        restart_output = run_single_dc("restart", NAVIDROME_APP_DIR)
+        scan_output = _scan_navidrome_library(NAVIDROME_APP_DIR)
 
     except Exception as e:
         log_callback(
@@ -128,7 +152,7 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-    restart_output = tail_log_lines(restart_output, 25)
+    scan_output = tail_log_lines(scan_output, 25)
 
     text = (
         "✅ <b>Playlist update complete</b>\n\n"
@@ -137,14 +161,14 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\n"
         f"<b>Music dir:</b> <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>\n"
         f"<b>Docker app:</b> <code>{html.escape(NAVIDROME_APP_DIR)}</code>\n\n"
-        f"<b>Docker restart output</b>\n<pre>{html.escape(restart_output or 'No output.')}</pre>"
+        f"<b>Navidrome scan output</b>\n<pre>{html.escape(scan_output or 'No output.')}</pre>"
     )
 
     if len(text) > 4000:
         text = (
             "✅ <b>Playlist update complete</b>\n"
             "(Output was too long and has been truncated.)\n\n"
-            f"<b>Docker restart output</b>\n<pre>{html.escape(tail_log_lines(restart_output, 12))}</pre>"
+            f"<b>Navidrome scan output</b>\n<pre>{html.escape(tail_log_lines(scan_output, 12))}</pre>"
         )
 
     log_callback(
@@ -162,7 +186,7 @@ def get_help_section() -> str | None:
     if not NAVIDROME_PLAYLIST_UPDATE_CMD:
         return None
     return (
-        "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists and restart Navidrome"
+        "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists and trigger Navidrome scan"
     )
 
 
@@ -172,7 +196,7 @@ def get_commands() -> list[tuple[str, str]]:
     return [
         (
             "update_playlist",
-            "Rebuild m3u8 playlists and restart Navidrome",
+            "Rebuild m3u8 playlists and trigger Navidrome scan",
         )
     ]
 
