@@ -52,6 +52,24 @@ _PLAYLIST_UPDATE_SCRIPT = (
     "done"
 )
 
+_TELEGRAM_MESSAGE_SAFE_LIMIT = 3900
+
+
+def _clip_scan_output_for_message(base_text: str, output: str) -> str:
+    escaped_output = html.escape(output or "No output.")
+    suffix = "\n...[truncated]"
+
+    # Ensure final message comfortably fits Telegram's 4096-char limit.
+    available = _TELEGRAM_MESSAGE_SAFE_LIMIT - len(base_text)
+    if available <= 0:
+        return "...[truncated]"
+
+    if len(escaped_output) <= available:
+        return escaped_output
+
+    trim_at = max(0, available - len(suffix))
+    return escaped_output[:trim_at] + suffix
+
 
 def _scan_navidrome_library(app_name: str) -> str:
     dir_path = DOCKER_APPS_DIR / app_name
@@ -154,22 +172,17 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     scan_output = tail_log_lines(scan_output, 25)
 
-    text = (
+    base_text = (
         "✅ <b>Playlist update complete</b>\n\n"
         f"<b>Playlists updated:</b> {playlists_updated}\n"
         f"<b>Tracks indexed:</b> {tracks_indexed:,}\n"
         "\n"
         f"<b>Music dir:</b> <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>\n"
         f"<b>Docker app:</b> <code>{html.escape(NAVIDROME_APP_DIR)}</code>\n\n"
-        f"<b>Navidrome scan output</b>\n<pre>{html.escape(scan_output or 'No output.')}</pre>"
+        "<b>Navidrome scan output</b>\n<pre>"
     )
-
-    if len(text) > 4000:
-        text = (
-            "✅ <b>Playlist update complete</b>\n"
-            "(Output was too long and has been truncated.)\n\n"
-            f"<b>Navidrome scan output</b>\n<pre>{html.escape(tail_log_lines(scan_output, 12))}</pre>"
-        )
+    clipped_scan_output = _clip_scan_output_for_message(base_text, scan_output)
+    text = base_text + clipped_scan_output + "</pre>"
 
     log_callback(
         log,
