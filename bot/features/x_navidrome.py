@@ -48,7 +48,7 @@ NAVIDROME_APP_DIR = os.getenv("NAVIDROME_APP_DIR", "navidrome")
 
 _PLAYLIST_UPDATE_SCRIPT = (
     'for dir in */; do dir="${dir%/}"; '
-    'find "$dir" -type f | sort > "${dir}.m3u8"; '
+    'playlist="${dir^}"; find "$dir" -type f | sort > "${playlist}.m3u8"; '
     "done"
 )
 
