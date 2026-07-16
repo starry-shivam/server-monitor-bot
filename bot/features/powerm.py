@@ -45,7 +45,7 @@ POWER_ACTIONS = {
             "‣ Active connections will drop\n\n"
             "Proceed?"
         ),
-        "unit": "power-helper@reboot",
+        "command": "reboot",
     },
     "poweroff": {
         "title": "⚠️ <b>Power Off Server</b>",
@@ -55,9 +55,11 @@ POWER_ACTIONS = {
             "‣ Manual startup will be required\n\n"
             "Proceed?"
         ),
-        "unit": "power-helper@poweroff",
+        "command": "poweroff",
     },
 }
+
+POWER_HELPER_BIN = "/usr/local/bin/power-helper"
 
 
 # ================= Callback Data =================
@@ -200,11 +202,12 @@ async def power_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "power",
                 action,
                 "executed",
-                detail=f"unit={meta['unit']}",
+                detail=f"helper={POWER_HELPER_BIN} action={meta['command']}",
             )
 
             subprocess.run(
-                ["systemctl", "start", meta["unit"]],
+                [POWER_HELPER_BIN, meta["command"]],
+                check=True,
                 timeout=5,
             )
 
