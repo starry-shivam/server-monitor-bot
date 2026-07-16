@@ -15,12 +15,27 @@ Environment=MPLCONFIGDIR=/tmp/mpl-cache
 
 # Security hardening
 User=starry
-NoNewPrivileges=true
-ProtectSystem=full
+# Protections
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
 ProtectHome=read-only
+ProtectClock=yes
+ProtectHostname=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+# Restrictions
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=~@mount
+# allow writing here
 ReadWritePaths=/home/starry/.docker/buildx
-PrivateTmp=true
-SystemCallFilter=~@reboot @mount
 
 [Install]
 WantedBy=multi-user.target
