@@ -145,11 +145,3 @@ Expected:
 ```text
 -rwsr-xr-x 1 root root ... /usr/local/bin/power-helper
 ```
-
-Security behavior:
-
-- Accepts only `reboot` or `poweroff`
-- Drops supplementary groups with `setgroups(0, NULL)`
-- Uses `setgid(0)` and `setuid(0)`
-- Clears environment with `clearenv()` before `exec`
-- Falls back to `/usr/bin` only when `/usr/sbin` path is missing (`ENOENT`)
