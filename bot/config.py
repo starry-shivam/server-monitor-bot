@@ -54,6 +54,7 @@ SHELL_ALLOWED_COMMANDS = {
 SHELL_FORBIDDEN_CHARS = {"&", ";", "|", ">", "<", "$", "`", "\\"}
 SHELL_TIMEOUT = int(os.getenv("SHELL_TIMEOUT", "45"))  # seconds
 SHELL_MAX_OUTPUT = int(os.getenv("SHELL_MAX_OUTPUT", "3600"))
+SHELL_ENABLED = os.getenv("SHELL_ENABLED", "false").lower() == "true"
 PYEXEC_ENABLED = os.getenv("PYEXEC_ENABLED", "false").lower() == "true"
 
 # --- Docker action config ---

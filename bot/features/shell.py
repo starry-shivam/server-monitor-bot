@@ -31,6 +31,7 @@ from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from bot.features import cb_sign
 from bot.logger import log_callback, log_security_event
 from bot.config import (
+    SHELL_ENABLED,
     SHELL_ALLOWED_COMMANDS,
     SHELL_FORBIDDEN_CHARS,
     SHELL_TIMEOUT,
@@ -253,14 +254,21 @@ async def shell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-def get_help_section() -> str:
+def get_help_section() -> str | None:
+    if not SHELL_ENABLED:
+        return None
     return "‣ <code>/shell</code> — Execute approved read-only shell commands"
 
 
 def get_commands() -> list[tuple[str, str]]:
+    if not SHELL_ENABLED:
+        return []
     return [("shell", "Execute approved read-only shell commands")]
 
 
 def register_handlers(app):
+    if not SHELL_ENABLED:
+        return
+
     app.add_handler(CommandHandler("shell", shell))
     app.add_handler(CallbackQueryHandler(shell_callback, pattern=r"^sh:"))

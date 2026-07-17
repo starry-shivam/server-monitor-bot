@@ -18,6 +18,8 @@ import subprocess
 import asyncio
 import logging
 
+import psutil
+
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -60,6 +62,7 @@ POWER_ACTIONS = {
 }
 
 POWER_HELPER_BIN = "/usr/local/bin/power-helper"
+REBOOT_MIN_UPTIME_SECONDS = 180  # 3 minutes
 
 
 # ================= Callback Data =================
@@ -73,6 +76,13 @@ def _cb(action: str, user_id: int, ts: int, phase: str) -> str:
 # ================= Commands ====+================
 @restricted
 async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uptime_seconds = int(time.time() - psutil.boot_time())
+    if uptime_seconds < REBOOT_MIN_UPTIME_SECONDS:
+        await update.message.reply_text(
+            "⚠️ Server has started recently. Please wait a few minutes before attempting to reboot again."
+        )
+        return
+
     await _prompt(update, context, "reboot")
 
 

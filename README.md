@@ -25,7 +25,7 @@ Feature commands:
 - `/dcpanel` Quick Docker app control panel
 - `/dcaction` Docker Compose operations
 - `/dcupdate` Check container image updates
-- `/shell` Run allowlisted read-only shell commands
+- `/shell` Run allowlisted read-only shell commands (optional)
 - `/dragon` Dragon Q6A hardware report (only on matching host)
 - `/reboot` Reboot host (optional)
 - `/poweroff` Power off host (optional)
@@ -54,6 +54,7 @@ CALLBACK_SIG_SECRET=change_me
 
 ```dotenv
 POWER_MGMT_AVAILABLE=true
+SHELL_ENABLED=false
 PYEXEC_ENABLED=false
 NOTIFY_DOCKER_UPDATES=true
 ```
@@ -107,6 +108,14 @@ To load `/reboot` and `/poweroff` commands, enable power management in `.env`:
 
 ```dotenv
 POWER_MGMT_AVAILABLE=true
+```
+
+The `/reboot` command is rate-limited for the first 3 minutes after boot.
+
+To load `/shell`, enable it explicitly in `.env`:
+
+```dotenv
+SHELL_ENABLED=true
 ```
 
 After changing `.env`, restart the bot (or restart the systemd service).
