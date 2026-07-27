@@ -694,6 +694,7 @@ def dcaction_help() -> str:
 @restricted
 async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
+    pending_message = None
     # Check if docker CLI is available
     if not shutil.which("docker"):
         return await update.message.reply_text(
@@ -830,8 +831,9 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         if action == "update":
+            pending_message = await update.message.reply_text("Checking for updates..")
             if not is_locally_built(target) and not has_dir_updates(target):
-                return await update.message.reply_text(
+                return await pending_message.edit_text(
                     f"✅ <code>{target}</code> is already up to date.",
                     parse_mode="HTML",
                 )
@@ -841,10 +843,21 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     run_action = "config_resolve" if action == "config" and resolve_config else action
     preview_action = "config --resolve" if run_action == "config_resolve" else raw_action
 
+    preview_text = build_action_preview(preview_action, target)
+    preview_markup = dc_keyboard(user_id, ts, run_action, target)
+
+    if pending_message is not None:
+        await pending_message.edit_text(
+            preview_text,
+            parse_mode="HTML",
+            reply_markup=preview_markup,
+        )
+        return
+
     await update.message.reply_text(
-        build_action_preview(preview_action, target),
+        preview_text,
         parse_mode="HTML",
-        reply_markup=dc_keyboard(user_id, ts, run_action, target),
+        reply_markup=preview_markup,
     )
 
 
