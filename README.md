@@ -1,13 +1,6 @@
 # Server Monitor Bot
 
-Telegram bot for server monitoring and managing my homeserver. **Intended for personal use only, No issues/PR accepted**.
-
-## What It Does
-
-- Shows system and container status
-- Runs restricted maintenance actions
-- Supports scheduled background jobs
-- Loads features dynamically, so modules can be enabled or disabled cleanly
+Telegram bot for monitoring and managing my homeserver. **Intended for personal use only. No issues or PRs accepted.**
 
 ## Commands
 
@@ -104,22 +97,6 @@ sudo systemctl restart server-monitor-bot.service
 
 ## Extra Feature: Power Management (Setup)
 
-To load `/reboot` and `/poweroff` commands, enable power management in `.env`:
-
-```dotenv
-POWER_MGMT_AVAILABLE=true
-```
-
-The `/reboot` command is rate-limited for the first 3 minutes after boot.
-
-To load `/shell`, enable it explicitly in `.env`:
-
-```dotenv
-SHELL_ENABLED=true
-```
-
-After changing `.env`, restart the bot (or restart the systemd service).
-
 Power actions use a tiny setuid C helper at `/usr/local/bin/power-helper`.
 
 1. Verify command paths:
@@ -154,3 +131,11 @@ Expected:
 ```text
 -rwsr-xr-x 1 root root ... /usr/local/bin/power-helper
 ```
+
+Finally, to load `/reboot` and `/poweroff` commands, enable power management in `.env`:
+
+```dotenv
+POWER_MGMT_AVAILABLE=true
+```
+
+After changing `.env`, restart the bot (or restart the systemd service).
