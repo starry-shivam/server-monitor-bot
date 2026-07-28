@@ -1,6 +1,6 @@
 # Server Monitor Bot
 
-Telegram bot for server monitoring and safe remote operations.
+Telegram bot for server monitoring and managing my homeserver. **Intended for personal use only, No issues/PR accepted**.
 
 ## What It Does
 
