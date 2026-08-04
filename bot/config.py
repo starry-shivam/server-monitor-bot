@@ -80,3 +80,8 @@ DC_IGNORE_UPDATE_NOTIF_DIRS = [
     for x in os.getenv("DC_IGNORE_UPDATE_NOTIF_DIRS", "").split(",")
     if x.strip()
 ]
+
+_dcpanel_start_mode = os.getenv("DCPANEL_START_MODE", "start").strip().lower()
+DCPANEL_START_MODE = (
+    _dcpanel_start_mode if _dcpanel_start_mode in {"start", "restart"} else "start"
+)

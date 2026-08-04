@@ -841,7 +841,9 @@ async def dcaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ts = int(time.time())
     run_action = "config_resolve" if action == "config" and resolve_config else action
-    preview_action = "config --resolve" if run_action == "config_resolve" else raw_action
+    preview_action = (
+        "config --resolve" if run_action == "config_resolve" else raw_action
+    )
 
     preview_text = build_action_preview(preview_action, target)
     preview_markup = dc_keyboard(user_id, ts, run_action, target)

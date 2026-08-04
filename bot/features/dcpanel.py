@@ -17,12 +17,13 @@ import hmac
 import shutil
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 from bot.auth import restricted, is_authorized_callback_user
-from bot.config import CALLBACK_TTL, DOCKER_APPS_DIR
+from bot.config import CALLBACK_TTL, DOCKER_APPS_DIR, DCPANEL_START_MODE
 from bot.features import cb_sign
 from bot.features.dcaction import (
     list_docker_dirs,
@@ -36,8 +37,46 @@ log = logging.getLogger(__name__)
 _GLOBAL_ACTION_RUNNING = False
 
 
-def _panel_store_key(chat_id: int, message_id: int) -> str:
-    return f"dcpanel:{chat_id}:{message_id}"
+def _to_base36(value: int) -> str:
+    if value < 0:
+        raise ValueError("base36 only supports non-negative integers")
+    if value == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out: list[str] = []
+    while value:
+        value, remainder = divmod(value, 36)
+        out.append(digits[remainder])
+    return "".join(reversed(out))
+
+
+def _from_base36(value: str) -> int:
+    return int(value, 36)
+
+
+def _app_token(name: str) -> str:
+    # Deterministic short token keeps callback_data under Telegram limits.
+    return cb_sign(f"app:{name}")
+
+
+def _find_app_by_token(apps: list[dict[str, str]], token: str) -> dict[str, str] | None:
+    for app in apps:
+        if _app_token(app["name"]) == token:
+            return app
+    return None
+
+
+def _find_app_name_by_token(token: str) -> str | None:
+    for name in list_docker_dirs():
+        if _app_token(name) == token:
+            return name
+    return None
+
+
+def _resolve_start_action(action: str) -> str:
+    if action == "up" and DCPANEL_START_MODE == "restart":
+        return "restart"
+    return action
 
 
 def _status_for_dir(name: str) -> str:
@@ -64,11 +103,15 @@ def _next_action_for_status(status: str) -> tuple[str, str, str]:
 
 
 def _collect_apps() -> list[dict[str, str]]:
-    apps: list[dict[str, str]] = []
-    for name in list_docker_dirs():
-        status = _status_for_dir(name)
-        apps.append({"name": name, "status": status})
-    return apps
+    names = list_docker_dirs()
+    if not names:
+        return []
+
+    workers = min(8, len(names))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        statuses = list(executor.map(_status_for_dir, names))
+
+    return [{"name": name, "status": status} for name, status in zip(names, statuses)]
 
 
 def _panel_text(apps: list[dict[str, str]]) -> str:
@@ -88,24 +131,41 @@ def _panel_text(apps: list[dict[str, str]]) -> str:
 
 
 def _cb_data(kind: str, uid: int, ts: int, msg_id: int, arg: str = "-") -> str:
-    payload = ":".join(["dcp", kind, str(uid), str(ts), str(msg_id), arg])
+    payload = ":".join(
+        ["dcp", kind, _to_base36(uid), _to_base36(ts), _to_base36(msg_id), arg]
+    )
     return f"{payload}:{cb_sign(payload)}"
 
 
 def _parse_callback(data: str) -> tuple[str, int, int, int, str, str] | None:
-    parts = data.split(":")
-    if len(parts) != 7 or parts[0] != "dcp":
-        return None
-    _, kind, uid, ts, msg_id, arg, sig = parts
     try:
-        return kind, int(uid), int(ts), int(msg_id), arg, sig
+        payload, sig = data.rsplit(":", 1)
+    except ValueError:
+        return None
+
+    parts = payload.split(":", 5)
+    if len(parts) != 6 or parts[0] != "dcp":
+        return None
+
+    _, kind, uid, ts, msg_id, arg = parts
+    try:
+        return (
+            kind,
+            _from_base36(uid),
+            _from_base36(ts),
+            _from_base36(msg_id),
+            arg,
+            sig,
+        )
     except ValueError:
         return None
 
 
 def _validate_callback_signature(parsed: tuple[str, int, int, int, str, str]) -> bool:
     kind, uid, ts, msg_id, arg, sig = parsed
-    payload = ":".join(["dcp", kind, str(uid), str(ts), str(msg_id), arg])
+    payload = ":".join(
+        ["dcp", kind, _to_base36(uid), _to_base36(ts), _to_base36(msg_id), arg]
+    )
     return hmac.compare_digest(sig, cb_sign(payload))
 
 
@@ -113,12 +173,14 @@ def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
     rows: list[list[InlineKeyboardButton]] = []
     current_row: list[InlineKeyboardButton] = []
 
-    for idx, app in enumerate(apps):
+    for app in apps:
         status = app["status"]
         current_row.append(
             InlineKeyboardButton(
                 f"{_status_emoji(status)} {app['name']}",
-                callback_data=_cb_data("pick", uid, ts, msg_id, str(idx)),
+                callback_data=_cb_data(
+                    "pick", uid, ts, msg_id, f"app|{_app_token(app['name'])}|{status}"
+                ),
             )
         )
         if len(current_row) == 2:
@@ -168,39 +230,14 @@ def _confirm_keyboard(uid: int, ts: int, msg_id: int, action_arg: str):
     )
 
 
-def _get_panel_state(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    message_id: int,
-) -> dict | None:
-    return context.bot_data.get(_panel_store_key(chat_id, message_id))
-
-
-def _set_panel_state(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    message_id: int,
-    uid: int,
-    apps: list[dict[str, str]],
-) -> None:
-    context.bot_data[_panel_store_key(chat_id, message_id)] = {
-        "uid": uid,
-        "apps": apps,
-        "updated_at": int(time.time()),
-    }
-
-
 async def _render_panel(
     q,
-    context: ContextTypes.DEFAULT_TYPE,
     uid: int,
     *,
     notice: str | None = None,
 ) -> None:
     apps = await asyncio.to_thread(_collect_apps)
-    chat_id = q.message.chat_id
     msg_id = q.message.message_id
-    _set_panel_state(context, chat_id, msg_id, uid, apps)
 
     panel_text = _panel_text(apps)
     if notice:
@@ -216,6 +253,7 @@ async def _render_panel(
 async def _run_for_all(action: str, apps: list[dict[str, str]]) -> tuple[int, int]:
     ran = 0
     skipped = 0
+    run_action = _resolve_start_action(action)
     for app in apps:
         status = app["status"]
         name = app["name"]
@@ -228,7 +266,7 @@ async def _run_for_all(action: str, apps: list[dict[str, str]]) -> tuple[int, in
             continue
 
         try:
-            await asyncio.to_thread(run_single_dc, action, name)
+            await asyncio.to_thread(run_single_dc, run_action, name)
             ran += 1
         except Exception:
             skipped += 1
@@ -236,7 +274,7 @@ async def _run_for_all(action: str, apps: list[dict[str, str]]) -> tuple[int, in
 
 
 @restricted
-async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def dcpanel(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if _GLOBAL_ACTION_RUNNING:
         return await update.message.reply_text(
@@ -266,7 +304,6 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.edit_text("❌ No docker app directories found.")
 
     # Build keyboard with real message id and render in place.
-    _set_panel_state(context, msg.chat_id, msg.message_id, user_id, apps)
     await msg.edit_text(
         _panel_text(apps),
         parse_mode="HTML",
@@ -274,7 +311,7 @@ async def dcpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def dcpanel_callback(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     global _GLOBAL_ACTION_RUNNING
 
     q = update.callback_query
@@ -318,36 +355,24 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             show_alert=True,
         )
 
-    state = _get_panel_state(context, q.message.chat_id, q.message.message_id)
-    if not state:
-        await q.answer(
-            "Panel state not found or expired. Rebuilt successfully.", show_alert=True
-        )
-        log_callback(log, q.from_user, "dcpanel", "restore", "restored")
-        return await _render_panel(
-            q,
-            context,
-            uid,
-            notice="ℹ️ Panel state was reset. Rebuilt successfully.",
-        )
-
-    apps: list[dict[str, str]] = state.get("apps", [])
-
     if kind == "back":
         await q.answer("Cancelling, please wait...")
         log_callback(log, q.from_user, "dcpanel", "cancel", "cancelled")
-        return await _render_panel(q, context, uid)
+        return await _render_panel(q, uid)
 
     if kind == "refresh":
         await q.answer("Refreshing panel status...")
         log_callback(log, q.from_user, "dcpanel", "refresh", "executed")
-        return await _render_panel(q, context, uid, notice="✅ Status refreshed.")
+        return await _render_panel(q, uid, notice="✅ Status refreshed.")
 
     if kind == "pick":
         if arg in {"all_up", "all_stop"}:
             await q.answer("Loading confirmation...")
             action = "up" if arg == "all_up" else "stop"
-            label = "Start all" if action == "up" else "Stop all"
+            if action == "up" and DCPANEL_START_MODE == "restart":
+                label = "Restart all"
+            else:
+                label = "Start all" if action == "up" else "Stop all"
             return await q.edit_message_text(
                 "⚠️ <b>Confirm Docker Action</b>\n\n"
                 f"• Target: <code>ALL</code>\n"
@@ -357,26 +382,25 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=_confirm_keyboard(uid, int(time.time()), msg_id, arg),
             )
 
-        try:
-            idx = int(arg)
-        except ValueError:
+        parts = arg.split("|", 2)
+        if len(parts) != 3 or parts[0] != "app":
             return await q.answer("🚫 Invalid app selection", show_alert=True)
 
-        if idx < 0 or idx >= len(apps):
-            return await q.answer(
-                "🚫 App entry expired. Reopen panel.", show_alert=True
-            )
+        token = parts[1]
+        status = parts[2]
+        name = await asyncio.to_thread(_find_app_name_by_token, token)
+        if not name:
+            return await q.answer("🚫 App not found. Reopen panel.", show_alert=True)
 
         await q.answer("Loading confirmation...")
-        selected = apps[idx]
-        _raw_action, short_action, display_action = _next_action_for_status(
-            selected["status"]
-        )
+        _, short_action, display_action = _next_action_for_status(status)
+        if short_action == "start" and DCPANEL_START_MODE == "restart":
+            display_action = "Restart"
 
         return await q.edit_message_text(
             "⚠️ <b>Confirm Docker Action</b>\n\n"
-            f"• App: <code>{selected['name']}</code>\n"
-            f"• Current Status: <code>{selected['status']}</code>\n"
+            f"• App: <code>{name}</code>\n"
+            f"• Current Status: <code>{status}</code>\n"
             f"• Action: <code>{display_action}</code>\n\n"
             "Proceed?",
             parse_mode="HTML",
@@ -384,7 +408,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 uid,
                 int(time.time()),
                 msg_id,
-                f"one|{idx}|{short_action}",
+                f"one|{token}|{short_action}",
             ),
         )
 
@@ -407,6 +431,7 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if arg in {"all_up", "all_stop"}:
             action = "up" if arg == "all_up" else "stop"
+            apps = await asyncio.to_thread(_collect_apps)
             ran, skipped = await _run_for_all(action, apps)
             log_callback(
                 log,
@@ -422,27 +447,28 @@ async def dcpanel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(parts) != 3 or parts[0] != "one":
                 return await q.edit_message_text("❌ Invalid action payload.")
 
-            idx = int(parts[1])
+            token = parts[1]
             short_action = parts[2]
             action = "up" if short_action == "start" else "stop"
+            run_action = _resolve_start_action(action)
 
-            if idx < 0 or idx >= len(apps):
+            target = await asyncio.to_thread(_find_app_name_by_token, token)
+            if not target:
                 return await q.edit_message_text(
-                    "❌ App entry expired. Run /dcpanel again."
+                    "❌ App not found. Run /dcpanel again."
                 )
 
-            target = apps[idx]["name"]
-            await asyncio.to_thread(run_single_dc, action, target)
+            await asyncio.to_thread(run_single_dc, run_action, target)
             log_callback(
                 log,
                 q.from_user,
                 "dcpanel",
-                action,
+                run_action,
                 "executed",
                 detail=target,
             )
 
-        await _render_panel(q, context, uid, notice="✅ Action complete.")
+        await _render_panel(q, uid, notice="✅ Action complete.")
     except Exception as e:
         log_callback(log, q.from_user, "dcpanel", "run", "failed", detail=str(e))
         await q.edit_message_text(

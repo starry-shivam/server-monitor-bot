@@ -32,8 +32,6 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
 
 from bot.auth import restricted
-from bot.features.dcaction import has_compose_file, tail_log_lines
-from bot.config import DOCKER_APPS_DIR
 from bot.logger import log_callback
 
 log = logging.getLogger(__name__)
@@ -44,54 +42,12 @@ NAVIDROME_PLAYLIST_UPDATE_CMD = (
 NAVIDROME_MUSIC_DIR = Path(
     os.getenv("NAVIDROME_MUSIC_DIR", "/home/starry/ssd/myfiles/music")
 ).expanduser()
-NAVIDROME_APP_DIR = os.getenv("NAVIDROME_APP_DIR", "navidrome")
 
 _PLAYLIST_UPDATE_SCRIPT = (
     'for dir in */; do dir="${dir%/}"; '
     'playlist="${dir^}"; find "$dir" -type f | sort > "${playlist}.m3u8"; '
     "done"
 )
-
-_TELEGRAM_MESSAGE_SAFE_LIMIT = 3900
-
-
-def _clip_scan_output_for_message(base_text: str, output: str) -> str:
-    escaped_output = html.escape(output or "No output.")
-    suffix = "\n...[truncated]"
-
-    # Ensure final message comfortably fits Telegram's 4096-char limit.
-    available = _TELEGRAM_MESSAGE_SAFE_LIMIT - len(base_text)
-    if available <= 0:
-        return "...[truncated]"
-
-    if len(escaped_output) <= available:
-        return escaped_output
-
-    trim_at = max(0, available - len(suffix))
-    return escaped_output[:trim_at] + suffix
-
-
-def _scan_navidrome_library(app_name: str) -> str:
-    dir_path = DOCKER_APPS_DIR / app_name
-
-    if not dir_path.exists():
-        raise FileNotFoundError("Directory does not exist")
-    if not has_compose_file(dir_path):
-        raise RuntimeError("No docker compose file found")
-
-    proc = subprocess.run(
-        ["docker", "compose", "exec", "navidrome", "/app/navidrome", "scan", "-f"],
-        cwd=dir_path,
-        capture_output=True,
-        text=True,
-        timeout=1800,
-        check=False,
-    )
-
-    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
-    if proc.returncode != 0:
-        raise RuntimeError(output or "Navidrome scan command failed")
-    return output or "No output."
 
 
 def _collect_playlist_stats(music_dir: Path) -> tuple[int, int]:
@@ -135,11 +91,6 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ bash is not available on this system."
         )
 
-    if not shutil.which("docker"):
-        return await update.message.reply_text(
-            "❌ Docker CLI not found on this system."
-        )
-
     if not NAVIDROME_MUSIC_DIR.exists() or not NAVIDROME_MUSIC_DIR.is_dir():
         return await update.message.reply_text(
             f"❌ Music directory not found: <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>",
@@ -151,10 +102,6 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         playlists_updated, tracks_indexed = _generate_playlists(NAVIDROME_MUSIC_DIR)
-
-        await status_msg.edit_text("🐋 Scanning Navidrome library...")
-
-        scan_output = _scan_navidrome_library(NAVIDROME_APP_DIR)
 
     except Exception as e:
         log_callback(
@@ -169,20 +116,13 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ <b>Update failed</b>\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
         )
-
-    scan_output = tail_log_lines(scan_output, 25)
-
-    base_text = (
+    text = (
         "✅ <b>Playlist update complete</b>\n\n"
         f"<b>Playlists updated:</b> {playlists_updated}\n"
         f"<b>Tracks indexed:</b> {tracks_indexed:,}\n"
         "\n"
-        f"<b>Music dir:</b> <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>\n"
-        f"<b>Docker app:</b> <code>{html.escape(NAVIDROME_APP_DIR)}</code>\n\n"
-        "<b>Navidrome scan output</b>\n<pre>"
+        f"<b>Music dir:</b> <code>{html.escape(str(NAVIDROME_MUSIC_DIR))}</code>"
     )
-    clipped_scan_output = _clip_scan_output_for_message(base_text, scan_output)
-    text = base_text + clipped_scan_output + "</pre>"
 
     log_callback(
         log,
@@ -198,9 +138,7 @@ async def update_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def get_help_section() -> str | None:
     if not NAVIDROME_PLAYLIST_UPDATE_CMD:
         return None
-    return (
-        "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists and trigger Navidrome scan"
-    )
+    return "‣ <code>/update_playlist</code> — Rebuild m3u8 playlists"
 
 
 def get_commands() -> list[tuple[str, str]]:
@@ -209,7 +147,7 @@ def get_commands() -> list[tuple[str, str]]:
     return [
         (
             "update_playlist",
-            "Rebuild m3u8 playlists and trigger Navidrome scan",
+            "Rebuild m3u8 playlists",
         )
     ]
 
