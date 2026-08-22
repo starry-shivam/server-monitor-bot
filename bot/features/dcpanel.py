@@ -130,30 +130,29 @@ def _panel_text(apps: list[dict[str, str]]) -> str:
     )
 
 
-def _cb_data(kind: str, uid: int, ts: int, msg_id: int, arg: str = "-") -> str:
+def _cb_data(kind: str, uid: int, ts: int, arg: str = "-") -> str:
     payload = ":".join(
-        ["dcp", kind, _to_base36(uid), _to_base36(ts), _to_base36(msg_id), arg]
+        ["dcp", kind, _to_base36(uid), _to_base36(ts), arg]
     )
     return f"{payload}:{cb_sign(payload)}"
 
 
-def _parse_callback(data: str) -> tuple[str, int, int, int, str, str] | None:
+def _parse_callback(data: str) -> tuple[str, int, int, str, str] | None:
     try:
         payload, sig = data.rsplit(":", 1)
     except ValueError:
         return None
 
-    parts = payload.split(":", 5)
-    if len(parts) != 6 or parts[0] != "dcp":
+    parts = payload.split(":", 4)
+    if len(parts) != 5 or parts[0] != "dcp":
         return None
 
-    _, kind, uid, ts, msg_id, arg = parts
+    _, kind, uid, ts, arg = parts
     try:
         return (
             kind,
             _from_base36(uid),
             _from_base36(ts),
-            _from_base36(msg_id),
             arg,
             sig,
         )
@@ -161,15 +160,15 @@ def _parse_callback(data: str) -> tuple[str, int, int, int, str, str] | None:
         return None
 
 
-def _validate_callback_signature(parsed: tuple[str, int, int, int, str, str]) -> bool:
-    kind, uid, ts, msg_id, arg, sig = parsed
+def _validate_callback_signature(parsed: tuple[str, int, int, str, str]) -> bool:
+    kind, uid, ts, arg, sig = parsed
     payload = ":".join(
-        ["dcp", kind, _to_base36(uid), _to_base36(ts), _to_base36(msg_id), arg]
+        ["dcp", kind, _to_base36(uid), _to_base36(ts), arg]
     )
     return hmac.compare_digest(sig, cb_sign(payload))
 
 
-def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
+def _panel_keyboard(uid: int, ts: int, apps: list[dict[str, str]]):
     rows: list[list[InlineKeyboardButton]] = []
     current_row: list[InlineKeyboardButton] = []
 
@@ -179,7 +178,7 @@ def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
             InlineKeyboardButton(
                 f"{_status_emoji(status)} {app['name']}",
                 callback_data=_cb_data(
-                    "pick", uid, ts, msg_id, f"app|{_app_token(app['name'])}|{status}"
+                    "pick", uid, ts, f"app|{_app_token(app['name'])}|{status}"
                 ),
             )
         )
@@ -194,11 +193,11 @@ def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
         [
             InlineKeyboardButton(
                 "▶ Start All",
-                callback_data=_cb_data("pick", uid, ts, msg_id, "all_up"),
+                callback_data=_cb_data("pick", uid, ts, "all_up"),
             ),
             InlineKeyboardButton(
                 "⏹ Stop All",
-                callback_data=_cb_data("pick", uid, ts, msg_id, "all_stop"),
+                callback_data=_cb_data("pick", uid, ts, "all_stop"),
             ),
         ]
     )
@@ -206,24 +205,24 @@ def _panel_keyboard(uid: int, ts: int, msg_id: int, apps: list[dict[str, str]]):
         [
             InlineKeyboardButton(
                 "🔄 Refresh Status",
-                callback_data=_cb_data("refresh", uid, ts, msg_id, "-"),
+                callback_data=_cb_data("refresh", uid, ts, "-"),
             )
         ]
     )
     return InlineKeyboardMarkup(rows)
 
 
-def _confirm_keyboard(uid: int, ts: int, msg_id: int, action_arg: str):
+def _confirm_keyboard(uid: int, ts: int, action_arg: str):
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "✅ Confirm",
-                    callback_data=_cb_data("run", uid, ts, msg_id, action_arg),
+                    callback_data=_cb_data("run", uid, ts, action_arg),
                 ),
                 InlineKeyboardButton(
                     "❌ Cancel",
-                    callback_data=_cb_data("back", uid, ts, msg_id, "-"),
+                    callback_data=_cb_data("back", uid, ts, "-"),
                 ),
             ]
         ]
@@ -237,7 +236,6 @@ async def _render_panel(
     notice: str | None = None,
 ) -> None:
     apps = await asyncio.to_thread(_collect_apps)
-    msg_id = q.message.message_id
 
     panel_text = _panel_text(apps)
     if notice:
@@ -246,7 +244,7 @@ async def _render_panel(
     await q.edit_message_text(
         panel_text,
         parse_mode="HTML",
-        reply_markup=_panel_keyboard(uid, int(time.time()), msg_id, apps),
+        reply_markup=_panel_keyboard(uid, int(time.time()), apps),
     )
 
 
@@ -303,11 +301,11 @@ async def dcpanel(update: Update, _context: ContextTypes.DEFAULT_TYPE):
         )  # So we don't immediately delete the "Building..." message and cause a jarring flash
         return await msg.edit_text("❌ No docker app directories found.")
 
-    # Build keyboard with real message id and render in place.
+    # Build keyboard and render in place.
     await msg.edit_text(
         _panel_text(apps),
         parse_mode="HTML",
-        reply_markup=_panel_keyboard(user_id, int(time.time()), msg.message_id, apps),
+        reply_markup=_panel_keyboard(user_id, int(time.time()), apps),
     )
 
 
@@ -320,7 +318,7 @@ async def dcpanel_callback(update: Update, _context: ContextTypes.DEFAULT_TYPE):
         log_security_event(log, "dcpanel_callback", "invalid_payload")
         return await q.answer("🚫 Invalid callback", show_alert=True)
 
-    kind, uid, ts, msg_id, arg, _sig = parsed
+    kind, uid, ts, arg, _sig = parsed
     now = int(time.time())
 
     if not is_authorized_callback_user(
@@ -345,9 +343,6 @@ async def dcpanel_callback(update: Update, _context: ContextTypes.DEFAULT_TYPE):
     if not _validate_callback_signature(parsed):
         log_security_event(log, "dcpanel_callback", "invalid_signature")
         return await q.answer("🚫 Invalid signature", show_alert=True)
-
-    if not q.message or q.message.message_id != msg_id:
-        return await q.answer("🚫 Message mismatch", show_alert=True)
 
     if _GLOBAL_ACTION_RUNNING:
         return await q.answer(
@@ -379,7 +374,7 @@ async def dcpanel_callback(update: Update, _context: ContextTypes.DEFAULT_TYPE):
                 f"• Action: <code>{label}</code>\n\n"
                 "Proceed?",
                 parse_mode="HTML",
-                reply_markup=_confirm_keyboard(uid, int(time.time()), msg_id, arg),
+                reply_markup=_confirm_keyboard(uid, int(time.time()), arg),
             )
 
         parts = arg.split("|", 2)
@@ -407,7 +402,6 @@ async def dcpanel_callback(update: Update, _context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_confirm_keyboard(
                 uid,
                 int(time.time()),
-                msg_id,
                 f"one|{token}|{short_action}",
             ),
         )
