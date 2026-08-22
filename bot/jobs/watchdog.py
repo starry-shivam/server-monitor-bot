@@ -39,8 +39,8 @@ async def watchdog_job(context: ContextTypes.DEFAULT_TYPE):
 
     mem_pct = psutil.virtual_memory().percent
 
-    # CPU temp alert (65°C) - Cooldown 30 mins
-    if temp_c > 65 and (now - last_alert["temp"] > 1800):
+    # CPU temp alert (70°C) - Cooldown 30 mins
+    if temp_c > 70 and (now - last_alert["temp"] > 1800):
         last_alert["temp"] = now
         await bot.send_message(
             chat_id=LOG_CHANNEL_ID,
